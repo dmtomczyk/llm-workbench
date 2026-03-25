@@ -1,0 +1,14 @@
+id: markdown_exporter
+name: Markdown Exporter
+version: 0.1.0
+kind: exporter
+description: Writes payloads to markdown files
+entrypoint: plugins.markdown_exporter.main:MarkdownExporterPlugin
+enabled_by_default: true
+config_schema:
+  type: object
+  properties: {}
+actions:
+  - name: export_markdown
+    description: Export payload as markdown
+    output_type: binary_artifact

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PluginManifest",
+  "type": "object",
+  "required": ["id", "name", "version", "kind", "entrypoint", "config_schema", "actions"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^[a-z0-9_-]+$"},
+    "name": {"type": "string"},
+    "version": {"type": "string"},
+    "kind": {"type": "string", "enum": ["llm_provider", "source_connector", "transformer", "exporter"]},
+    "description": {"type": "string"},
+    "entrypoint": {"type": "string"},
+    "enabled_by_default": {"type": "boolean", "default": true},
+    "capabilities": {"type": "object", "default": {}},
+    "config_schema": {"type": "object"},
+    "dependencies": {"type": "array", "items": {"type": "string"}, "default": []},
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "description"],
+        "properties": {
+          "name": {"type": "string"},
+          "description": {"type": "string"},
+          "input_schema": {"type": "object"},
+          "output_type": {"type": "string"},
+          "supports_preview": {"type": "boolean", "default": false},
+          "supports_pagination": {"type": "boolean", "default": false}
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,24 @@
+id: outlook_files
+name: Outlook Local File Parser
+version: 0.1.0
+kind: source_connector
+description: Parses local EML and MSG files
+entrypoint: plugins.outlook_files.main:OutlookFilesPlugin
+enabled_by_default: true
+capabilities:
+  file_types:
+    - eml
+    - msg
+config_schema:
+  type: object
+  properties: {}
+actions:
+  - name: parse_eml
+    description: Parse an EML file
+    output_type: document_set
+  - name: parse_msg
+    description: Parse a MSG file
+    output_type: document_set
+  - name: extract_attachments
+    description: Extract attachment metadata
+    output_type: mixed_bundle

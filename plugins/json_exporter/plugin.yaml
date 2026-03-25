@@ -1,0 +1,14 @@
+id: json_exporter
+name: JSON Exporter
+version: 0.1.0
+kind: exporter
+description: Writes payloads to JSON files
+entrypoint: plugins.json_exporter.main:JsonExporterPlugin
+enabled_by_default: true
+config_schema:
+  type: object
+  properties: {}
+actions:
+  - name: export_json
+    description: Export payload as JSON
+    output_type: binary_artifact

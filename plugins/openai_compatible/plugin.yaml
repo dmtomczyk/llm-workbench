@@ -1,0 +1,29 @@
+id: openai_compatible
+name: OpenAI-Compatible Provider
+version: 0.1.0
+kind: llm_provider
+description: Native support for OpenAI-compatible Responses and Chat Completions endpoints
+entrypoint: plugins.openai_compatible.main:OpenAICompatibleProviderPlugin
+enabled_by_default: true
+capabilities:
+  streaming: true
+  json_mode: true
+  usage_metrics: true
+  tools: false
+config_schema:
+  type: object
+  required: [base_url]
+  properties:
+    base_url:
+      type: string
+    default_model:
+      type: string
+    auth_strategy:
+      type: object
+actions:
+  - name: invoke_responses
+    description: Invoke OpenAI-compatible /responses endpoint
+    output_type: text_bundle
+  - name: invoke_chat_completions
+    description: Invoke OpenAI-compatible /chat/completions endpoint
+    output_type: text_bundle

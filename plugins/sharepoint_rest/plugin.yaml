@@ -1,0 +1,29 @@
+id: sharepoint_rest
+name: SharePoint REST Connector
+version: 0.1.0
+kind: source_connector
+description: Connects to SharePoint REST endpoints
+entrypoint: plugins.sharepoint_rest.main:SharePointRestPlugin
+enabled_by_default: true
+capabilities:
+  auth:
+    - bearer
+    - ntlm
+    - custom_header
+config_schema:
+  type: object
+  required: [base_url, auth_type]
+  properties:
+    base_url:
+      type: string
+    auth_type:
+      type: string
+    secret_alias:
+      type: string
+actions:
+  - name: list_documents
+    description: List documents from a library
+    output_type: document_set
+  - name: list_items
+    description: List items from a list
+    output_type: record_set

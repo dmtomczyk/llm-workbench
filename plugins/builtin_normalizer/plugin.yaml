@@ -1,0 +1,14 @@
+id: builtin_normalizer
+name: Builtin Normalizer
+version: 0.1.0
+kind: transformer
+description: Built-in payload merging and shaping transforms
+entrypoint: plugins.builtin_normalizer.main:BuiltinNormalizerPlugin
+enabled_by_default: true
+config_schema:
+  type: object
+  properties: {}
+actions:
+  - name: merge_payloads
+    description: Merge multiple normalized payloads into a mixed bundle
+    output_type: mixed_bundle

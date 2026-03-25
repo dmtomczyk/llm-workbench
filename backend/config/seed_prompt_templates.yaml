@@ -1,0 +1,55 @@
+templates:
+  - slug: weekly_engineering_summary
+    name: Weekly Engineering Summary
+    description: Summarize work, risks, blockers, and decisions for a manager
+    tags: [manager, weekly, summary]
+    system_prompt: |
+      You are an engineering operations assistant. Produce concise, decision-useful management summaries.
+    user_prompt_template: |
+      Summarize the following engineering updates for {{ vars.team_name | default("the team") }}.
+      Focus on:
+      1. completed work
+      2. in-flight work
+      3. blockers/risks
+      4. decisions needed
+      5. recommended manager actions
+
+      Source data:
+      {{ payload | tojson(indent=2) }}
+
+  - slug: sprint_health_summary
+    name: Sprint Health Summary
+    description: Assess sprint health from issues and notes
+    tags: [manager, sprint, jira]
+    system_prompt: |
+      You evaluate sprint execution and produce a practical health report.
+    user_prompt_template: |
+      Review the sprint data below and produce:
+      - overall health
+      - major progress themes
+      - delivery risk
+      - recommended actions
+      - a short executive-ready paragraph
+
+      Data:
+      {{ payload | tojson(indent=2) }}
+
+  - slug: risk_extraction
+    name: Risk Extraction
+    description: Extract concrete risks and mitigations from mixed input
+    tags: [risk, analysis]
+    system_prompt: |
+      Extract risks with explicit cause, impact, evidence, and mitigation.
+    user_prompt_template: |
+      Extract a risk register from this input.
+      Return each risk with:
+      - title
+      - cause
+      - impact
+      - severity
+      - evidence
+      - mitigation
+      - owner suggestion
+
+      Input:
+      {{ payload | tojson(indent=2) }}

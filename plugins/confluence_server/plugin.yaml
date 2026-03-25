@@ -1,0 +1,30 @@
+id: confluence_server
+name: Confluence Server Connector
+version: 0.1.0
+kind: source_connector
+description: Connects to Confluence Server/Data Center via REST
+entrypoint: plugins.confluence_server.main:ConfluenceServerPlugin
+enabled_by_default: true
+capabilities:
+  auth:
+    - bearer
+    - basic
+config_schema:
+  type: object
+  required: [base_url, auth_type, secret_alias]
+  properties:
+    base_url:
+      type: string
+    auth_type:
+      type: string
+      enum: [bearer, basic]
+    secret_alias:
+      type: string
+actions:
+  - name: search_pages
+    description: Search pages
+    output_type: document_set
+    supports_preview: true
+  - name: get_page
+    description: Get a page by ID
+    output_type: document_set

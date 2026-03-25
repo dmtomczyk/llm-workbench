@@ -1,0 +1,28 @@
+id: generic_openapi
+name: Generic OpenAPI Provider
+version: 0.1.0
+kind: llm_provider
+description: Invokes a configured OpenAPI operation with templated request mapping
+entrypoint: plugins.generic_openapi.main:GenericOpenAPIProviderPlugin
+enabled_by_default: true
+capabilities:
+  streaming: false
+  json_mode: true
+config_schema:
+  type: object
+  required: [base_url, invoke_method, invoke_path]
+  properties:
+    base_url:
+      type: string
+    invoke_method:
+      type: string
+    invoke_path:
+      type: string
+    request_template:
+      type: object
+    response_extractors:
+      type: object
+actions:
+  - name: invoke_operation
+    description: Invoke configured OpenAPI operation
+    output_type: mixed_bundle

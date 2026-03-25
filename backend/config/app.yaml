@@ -1,0 +1,59 @@
+app:
+  name: OpenAPI Web Client Wrapper
+  env: local
+  timezone: America/New_York
+
+server:
+  host: 0.0.0.0
+  port: 8080
+  cors_origins:
+    - http://localhost:5173
+
+database:
+  url: sqlite:///./data/app.db
+
+storage:
+  root_dir: ./data
+  imports_dir: ./data/imports
+  artifacts_dir: ./data/artifacts
+  exports_dir: ./data/exports
+  logs_dir: ./data/logs
+
+scheduler:
+  enabled: true
+  timezone: America/New_York
+  max_concurrent_jobs: 1
+  job_defaults:
+    misfire_grace_time: 300
+    coalesce: true
+
+audit:
+  inline_payload_limit_bytes: 65536
+  redact_fields:
+    - authorization
+    - api_key
+    - token
+    - password
+    - cookie
+
+plugins:
+  directory: ./plugins
+  allow_reload: true
+
+imports:
+  max_upload_size_mb: 100
+  allowed_extensions:
+    - csv
+    - xlsx
+    - json
+    - txt
+    - md
+    - docx
+    - pdf
+    - eml
+    - msg
+
+exports:
+  default_formats:
+    - markdown
+    - json
