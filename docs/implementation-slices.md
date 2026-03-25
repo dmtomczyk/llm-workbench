@@ -1,6 +1,6 @@
 # Implementation slices
 
-This file tracks the current execution plan for the OpenAPI Web Client Wrapper build.
+This file tracks the current execution plan for the BRIDGE build.
 
 ## Slice 1 — Foundation and runtime spine
 
@@ -23,6 +23,8 @@ Delivered so far:
 - `plugins/` built-in plugin packages/manifests
 - audit API and provider API
 - seeded prompt templates
+- seeded default providers (`demo-mock`, `ollama-local`)
+- seeded welcome demo chat session
 
 ## Slice 2 — Imports and datasets
 
@@ -46,7 +48,7 @@ Target endpoints:
 
 ## Slice 3 — Manual workbench run
 
-**Status:** next active build slice
+**Status:** active build slice
 
 Goal:
 - select uploaded dataset or parsed content
@@ -64,7 +66,42 @@ Target endpoints:
 - `DELETE /api/templates/{template_id}`
 - `POST /api/workbench/run`
 
-## Slice 4 — OpenAPI + connectors operator layer
+## Slice 4 — First-class chat with providers
+
+**Status:** active build slice / foundation implemented
+
+Goal:
+- support direct back-and-forth chat with an LLM without requiring uploads, datasets, or templates
+- allow optional system prompt, model selection, and provider selection
+- preserve chat sessions and message history in the app
+- support both provider-native conversation state when available and app-managed conversation history when it is not
+- audit every chat turn and link each turn to `run` + `llm_interaction` records
+
+Planned UX:
+- dedicated `Chat` page in the sidebar
+- session list / new chat
+- message transcript
+- provider + model controls
+- optional system prompt / temperature settings later
+- save transcript/export later
+
+Target endpoints:
+- `GET /api/chat/sessions`
+- `POST /api/chat/sessions`
+- `GET /api/chat/sessions/{session_id}`
+- `GET /api/chat/sessions/{session_id}/messages`
+- `POST /api/chat/sessions/{session_id}/messages`
+- `POST /api/chat/sessions/{session_id}/complete`
+
+Notes:
+- chat session + chat message tables are now in the runtime schema
+- audit rows for chat events now populate `session_id`
+- session rename/update/delete, transcript export, and pragmatic stream-mode responses are now wired in
+- if a provider exposes conversation state, store the provider conversation handle as session metadata
+- otherwise send app-managed prior messages on each turn
+- this shares the same provider abstraction already used by workbench runs
+
+## Slice 5 — OpenAPI + connectors operator layer
 
 **Status:** next active build slice
 

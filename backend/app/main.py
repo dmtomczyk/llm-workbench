@@ -6,11 +6,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
+from app.chat.service import ChatService
 from app.core.config import get_settings
 from app.core.request_context import RequestContextMiddleware
 from app.db.bootstrap import bootstrap_database
-from app.db.session import init_engine
+from app.db.session import get_db, init_engine
 from app.plugins.service import PluginService
+from app.providers.service import ProviderService
 from app.templates.service import TemplateService
 
 
@@ -24,6 +26,13 @@ async def lifespan(app: FastAPI):
     plugin_service = PluginService()
     app.state.plugin_service = plugin_service
     plugin_service.sync_registry()
+    db = next(get_db())
+    try:
+        provider_service = ProviderService(db, plugin_service)
+        provider_service.seed_defaults()
+        ChatService(db, provider_service).seed_defaults()
+    finally:
+        db.close()
     yield
 
 

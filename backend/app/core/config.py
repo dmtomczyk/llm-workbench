@@ -14,7 +14,13 @@ ENV_PREFIX = "OAWCW__"
 
 
 class AppMetaSettings(BaseModel):
-    name: str = "OpenAPI Web Client Wrapper"
+    name: str = "BRIDGE"
+    short_name: str = "BRIDGE"
+    acronym_expansion: str = "Bridge for Reasoning, Interaction, Data, Guidance, and Execution"
+    tagline: str = "Where LLMs, tools, and data meet"
+    description: str = (
+        "Single-user operator workspace for chat, workflows, datasets, connectors, and provider-driven automations."
+    )
     env: str = "local"
     timezone: str = "America/New_York"
 

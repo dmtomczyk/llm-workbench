@@ -37,7 +37,8 @@ export function WorkbenchPage() {
 
   async function onUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formEl = event.currentTarget;
+    const form = new FormData(formEl);
     const file = form.get('file');
     if (!(file instanceof File)) return;
     setUploading(true);
@@ -48,7 +49,7 @@ export function WorkbenchPage() {
       payload.append('file', file);
       await fetch('/api/imports/files', { method: 'POST', body: payload });
       await loadAll();
-      event.currentTarget.reset();
+      formEl.reset();
     } catch (err) {
       setError(String(err));
     } finally {
@@ -91,6 +92,7 @@ export function WorkbenchPage() {
 
         <div className="card">
           <h2>Run workbench</h2>
+          <p className="muted">For a first smoke test, try the seeded <strong>demo-mock</strong> provider. If you run Ollama locally, <strong>ollama-local</strong> is also seeded.</p>
           <form className="stack" onSubmit={onRun}>
             <select name="dataset_id" required defaultValue="">
               <option value="" disabled>Select dataset</option>

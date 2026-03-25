@@ -19,7 +19,47 @@ from app.providers.schemas import ProviderCreate, ProviderRead, ProviderUpdate
 KIND_TO_PLUGIN = {
     'openai_compatible': 'openai_compatible',
     'generic_openapi': 'generic_openapi',
+    'mock': 'mock_provider',
 }
+
+SEED_PROVIDERS = [
+    {
+        'id': 'prv_demo_mock',
+        'name': 'demo-mock',
+        'plugin_id': 'mock_provider',
+        'provider_kind': 'mock',
+        'base_url': None,
+        'default_model': 'mock-echo-v1',
+        'auth_type': None,
+        'secret_alias': None,
+        'capabilities_json': json.dumps({
+            'streaming': False,
+            'json_mode': True,
+            'usage_metrics': True,
+            'conversation_state': False,
+            'tools': False,
+        }),
+        'enabled': 1,
+    },
+    {
+        'id': 'prv_ollama_local',
+        'name': 'ollama-local',
+        'plugin_id': 'openai_compatible',
+        'provider_kind': 'openai_compatible',
+        'base_url': 'http://localhost:11434/v1',
+        'default_model': 'llama3.2:3b',
+        'auth_type': None,
+        'secret_alias': None,
+        'capabilities_json': json.dumps({
+            'streaming': True,
+            'json_mode': True,
+            'usage_metrics': True,
+            'conversation_state': False,
+            'tools': False,
+        }),
+        'enabled': 1,
+    },
+]
 
 
 class ProviderService:
@@ -27,6 +67,36 @@ class ProviderService:
         self.db = db
         self.plugin_service = plugin_service
         self.audit = AuditService(db)
+
+    def seed_defaults(self) -> None:
+        seeded_any = False
+        for seed in SEED_PROVIDERS:
+            row = self.db.get(LLMProvider, seed['id'])
+            if row is not None:
+                continue
+            row = LLMProvider(
+                id=seed['id'],
+                name=seed['name'],
+                plugin_id=seed['plugin_id'],
+                provider_kind=seed['provider_kind'],
+                base_url=seed['base_url'],
+                default_model=seed['default_model'],
+                auth_type=seed['auth_type'],
+                secret_alias=seed['secret_alias'],
+                capabilities_json=seed['capabilities_json'],
+                enabled=seed['enabled'],
+            )
+            self.db.add(row)
+            seeded_any = True
+            self.audit.record(AuditEventCreate(
+                action='provider.seeded',
+                entity_type='provider',
+                entity_id=row.id,
+                after={'name': row.name, 'plugin_id': row.plugin_id, 'provider_kind': row.provider_kind},
+                source='system',
+            ))
+        if seeded_any:
+            self.db.commit()
 
     def list(self) -> list[ProviderRead]:
         rows = self.db.scalars(select(LLMProvider).order_by(LLMProvider.name)).all()
@@ -143,6 +213,12 @@ class ProviderService:
             raise HTTPException(status_code=404, detail='Provider not found')
         requested_run_id = request_payload.get('run_id')
         run = self.db.get(Run, requested_run_id) if requested_run_id else None
+        merged_metadata = {'model': request_payload.get('model') or row.default_model}
+        if run is not None and run.metadata_json:
+            try:
+                merged_metadata = {**json.loads(run.metadata_json), **merged_metadata}
+            except Exception:  # noqa: BLE001
+                pass
         if run is None:
             run = Run(
                 id=requested_run_id or f'run_{uuid4().hex}',
@@ -152,13 +228,13 @@ class ProviderService:
                 provider_id=row.id,
                 summary=f'Invoking provider {row.name}',
                 started_at=datetime.now(UTC).isoformat(),
-                metadata_json=json.dumps({'model': request_payload.get('model') or row.default_model}),
+                metadata_json=json.dumps(merged_metadata),
             )
         else:
             run.provider_id = row.id
             run.status = 'running'
             run.summary = f'Invoking provider {row.name}'
-            run.metadata_json = json.dumps({'model': request_payload.get('model') or row.default_model})
+            run.metadata_json = json.dumps(merged_metadata)
             if not run.started_at:
                 run.started_at = datetime.now(UTC).isoformat()
         self.db.add(run)

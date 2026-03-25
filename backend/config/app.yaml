@@ -1,5 +1,9 @@
 app:
-  name: OpenAPI Web Client Wrapper
+  name: BRIDGE
+  short_name: BRIDGE
+  acronym_expansion: Bridge for Reasoning, Interaction, Data, Guidance, and Execution
+  tagline: Where LLMs, tools, and data meet
+  description: Single-user operator workspace for chat, workflows, datasets, connectors, and provider-driven automations.
   env: local
   timezone: America/New_York
 

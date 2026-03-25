@@ -237,6 +237,31 @@ def upgrade() -> None:
         sa.Column("created_at", sa.Text(), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
     )
     op.create_table(
+        "chat_session",
+        sa.Column("id", sa.Text(), primary_key=True),
+        sa.Column("title", sa.Text(), nullable=False),
+        sa.Column("provider_id", sa.Text(), nullable=False),
+        sa.Column("model_name", sa.Text()),
+        sa.Column("system_prompt", sa.Text()),
+        sa.Column("provider_conversation_id", sa.Text()),
+        sa.Column("message_count", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("metadata_json", sa.Text(), nullable=False, server_default="{}"),
+        sa.Column("created_at", sa.Text(), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column("updated_at", sa.Text(), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+    )
+    op.create_table(
+        "chat_message",
+        sa.Column("id", sa.Text(), primary_key=True),
+        sa.Column("session_id", sa.Text(), nullable=False),
+        sa.Column("run_id", sa.Text()),
+        sa.Column("sequence_no", sa.Integer(), nullable=False),
+        sa.Column("role", sa.Text(), nullable=False),
+        sa.Column("content_text", sa.Text(), nullable=False),
+        sa.Column("provider_message_id", sa.Text()),
+        sa.Column("metadata_json", sa.Text(), nullable=False, server_default="{}"),
+        sa.Column("created_at", sa.Text(), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+    )
+    op.create_table(
         "audit_event",
         sa.Column("id", sa.Text(), primary_key=True),
         sa.Column("occurred_at", sa.Text(), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
@@ -289,6 +314,10 @@ def upgrade() -> None:
         sa.Column("error_text", sa.Text()),
         sa.Column("created_at", sa.Text(), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
     )
+    op.create_index("idx_chat_session_updated_at", "chat_session", ["updated_at"], unique=False)
+    op.create_index("idx_chat_session_provider_id", "chat_session", ["provider_id"], unique=False)
+    op.create_index("idx_chat_message_session_id", "chat_message", ["session_id", "sequence_no"], unique=False)
+    op.create_index("idx_chat_message_run_id", "chat_message", ["run_id"], unique=False)
     op.create_index("idx_audit_event_occurred_at", "audit_event", ["occurred_at"], unique=False)
     op.create_index("idx_audit_event_action", "audit_event", ["action"], unique=False)
     op.create_index("idx_audit_event_correlation_id", "audit_event", ["correlation_id"], unique=False)
@@ -314,12 +343,18 @@ def downgrade() -> None:
     op.drop_index("idx_audit_event_correlation_id", table_name="audit_event")
     op.drop_index("idx_audit_event_action", table_name="audit_event")
     op.drop_index("idx_audit_event_occurred_at", table_name="audit_event")
+    op.drop_index("idx_chat_message_run_id", table_name="chat_message")
+    op.drop_index("idx_chat_message_session_id", table_name="chat_message")
+    op.drop_index("idx_chat_session_provider_id", table_name="chat_session")
+    op.drop_index("idx_chat_session_updated_at", table_name="chat_session")
     for table in [
         "connector_call",
         "llm_interaction",
         "audit_event",
         "export_record",
         "artifact",
+        "chat_message",
+        "chat_session",
         "run_step",
         "run",
         "scheduled_job",

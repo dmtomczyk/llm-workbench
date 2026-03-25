@@ -251,6 +251,41 @@ class ExportRecord(Base):
     created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("CURRENT_TIMESTAMP"))
 
 
+class ChatSession(Base, TimestampTextMixin):
+    __tablename__ = "chat_session"
+    __table_args__ = (
+        Index("idx_chat_session_updated_at", "updated_at"),
+        Index("idx_chat_session_provider_id", "provider_id"),
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    provider_id: Mapped[str] = mapped_column(Text, nullable=False)
+    model_name: Mapped[str | None] = mapped_column(Text)
+    system_prompt: Mapped[str | None] = mapped_column(Text)
+    provider_conversation_id: Mapped[str | None] = mapped_column(Text)
+    message_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    metadata_json: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'{}'"))
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_message"
+    __table_args__ = (
+        Index("idx_chat_message_session_id", "session_id", "sequence_no"),
+        Index("idx_chat_message_run_id", "run_id"),
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    session_id: Mapped[str] = mapped_column(Text, nullable=False)
+    run_id: Mapped[str | None] = mapped_column(Text)
+    sequence_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    role: Mapped[str] = mapped_column(Text, nullable=False)
+    content_text: Mapped[str] = mapped_column(Text, nullable=False)
+    provider_message_id: Mapped[str | None] = mapped_column(Text)
+    metadata_json: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'{}'"))
+    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("CURRENT_TIMESTAMP"))
+
+
 class AuditEvent(Base):
     __tablename__ = "audit_event"
     __table_args__ = (

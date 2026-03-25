@@ -7,8 +7,8 @@ export function Layout() {
     <div className="shell">
       <aside className="sidebar">
         <div className="brand">
-          <h1>OWCW</h1>
-          <p>Operator workbench</p>
+          <h1 className="brand-logo">BRIDGE</h1>
+          <p>Where LLMs, tools, and data meet</p>
         </div>
         <nav className="nav">
           {NAV_ITEMS.map((item) => (
@@ -25,9 +25,9 @@ export function Layout() {
       </aside>
       <main className="main">
         <header className="topbar">
-          <div>
-            <strong>OpenAPI Web Client Wrapper</strong>
-            <span className="muted">Foundation slice</span>
+          <div className="topbar-brand">
+            <strong>BRIDGE</strong>
+            <span className="muted">Bridge for Reasoning, Interaction, Data, Guidance, and Execution</span>
           </div>
         </header>
         <section className="content">

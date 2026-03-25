@@ -14,7 +14,7 @@ usage() {
   cat <<'EOF'
 Usage: ./bootstrap.sh [options]
 
-Sets up the OpenAPI Web Client Wrapper project locally.
+Sets up the BRIDGE project locally.
 
 Options:
   --with-dev         Install backend dev/test dependencies

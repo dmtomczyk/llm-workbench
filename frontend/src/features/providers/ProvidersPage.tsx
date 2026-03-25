@@ -82,11 +82,13 @@ export function ProvidersPage() {
       <div className="grid two-col">
         <div className="card">
           <h2>Add provider</h2>
+          <p className="muted">Fresh installs are automatically seeded with <strong>demo-mock</strong> and <strong>ollama-local</strong>.</p>
           <form className="stack" onSubmit={onProviderSubmit}>
             <input name="name" placeholder="gpt-oss-internal" required />
             <select name="kind" defaultValue="openai_compatible">
               <option value="openai_compatible">OpenAI-compatible</option>
               <option value="generic_openapi">Generic OpenAPI</option>
+              <option value="mock">Mock / demo</option>
             </select>
             <input name="base_url" placeholder="https://llm.internal.example/v1" />
             <input name="default_model" placeholder="openai/gpt-oss-120b" />

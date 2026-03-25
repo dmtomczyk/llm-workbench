@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "openapi-web-client-wrapper-backend"
+name = "bridge-backend"
 version = "0.1.0"
-description = "Backend for OpenAPI Web Client Wrapper"
+description = "Backend for BRIDGE"
 requires-python = ">=3.12"
 dependencies = [
   "alembic>=1.14.0",

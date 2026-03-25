@@ -1,0 +1,22 @@
+id: mock_provider
+name: Mock Demo Provider
+version: 0.1.0
+kind: llm_provider
+description: No-credential mock provider for first-run testing and UI verification
+entrypoint: plugins.mock_provider.main:MockProviderPlugin
+enabled_by_default: true
+capabilities:
+  streaming: false
+  json_mode: true
+  usage_metrics: true
+  conversation_state: false
+  tools: false
+config_schema:
+  type: object
+  properties:
+    default_model:
+      type: string
+actions:
+  - name: invoke_mock
+    description: Return a deterministic mock LLM response
+    output_type: text_bundle

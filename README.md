@@ -1,4 +1,6 @@
-# OpenAPI Web Client Wrapper
+# BRIDGE
+
+> Bridge for Reasoning, Interaction, Data, Guidance, and Execution
 
 ## Current slice
 
@@ -13,8 +15,12 @@ Implemented so far:
 - plugin manifest validation and registry sync
 - seeded built-in plugin manifests
 - provider CRUD / test / invoke routes
+- seeded demo providers (`demo-mock`, `ollama-local`)
 - seed prompt template loader
-- React/Vite shell with dashboard, providers, plugins, and audit pages
+- imports/datasets pipeline
+- first-class chat sessions + message history + completion APIs
+- chat session update/delete, transcript export, and pragmatic streaming responses
+- React/Vite shell with dashboard, chat, workbench, providers, connectors, plugins, and audit pages
 
 ## Repo layout
 
@@ -26,7 +32,7 @@ Implemented so far:
 ## One-command bootstrap
 
 ```bash
-cd ~/code/foss-projects/llm-intf-client
+cd ~/code/foss-projects/BRIDGE
 ./bootstrap.sh
 ```
 
@@ -40,7 +46,7 @@ Optional flags:
 ## One-command dev run
 
 ```bash
-cd ~/code/foss-projects/llm-intf-client
+cd ~/code/foss-projects/BRIDGE
 ./run-dev.sh
 ```
 
@@ -72,6 +78,9 @@ Frontend expects the backend on `http://localhost:8080` and proxies `/api` there
 
 ## Notes
 
-- Provider calls are wired for OpenAI-compatible and generic OpenAPI invocation, but no real endpoint/secret is configured yet.
+- Fresh installs are seeded with a no-credential `demo-mock` provider, an `ollama-local` preset, and a welcome demo chat session.
+- Chat turns, workbench runs, provider invocations, and connector actions all write audit records; chat-specific audit rows now also populate `session_id`.
+- Provider calls are wired for OpenAI-compatible, mock, and generic OpenAPI invocation, but no real remote endpoint/secret is configured yet.
 - Connector plugins are scaffolded and registered, but their network logic is still stubbed.
-- Imports/workbench/workflows/scheduler/export UI are next.
+- Workflow/scheduler/export UX are the next larger slices.
+- Immediate pickup TODOs are tracked in `docs/next-up-todos.md`.

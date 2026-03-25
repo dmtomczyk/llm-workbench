@@ -15,6 +15,7 @@ class AuditEventCreate(BaseModel):
     after: dict[str, Any] | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     run_id: str | None = None
+    session_id: str | None = None
     source: str | None = None
 
 
@@ -31,6 +32,7 @@ class AuditEventRead(BaseModel):
     request_id: str | None = None
     correlation_id: str | None = None
     run_id: str | None = None
+    session_id: str | None = None
     message: str | None = None
     before: dict[str, Any] | None = None
     after: dict[str, Any] | None = None
