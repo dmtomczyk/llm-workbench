@@ -6,6 +6,24 @@ from uuid import uuid4
 import httpx
 import yaml
 from fastapi import HTTPException
+
+
+class _NoDatesSafeLoader(yaml.SafeLoader):
+    """YAML loader that keeps timestamp-like scalars as strings.
+
+    PyYAML's default implicit resolvers coerce unquoted timestamps into
+    datetime/date objects, which then break JSON serialization.
+
+    For OpenAPI documents, treating these values as plain strings is the
+    least-surprising behavior.
+    """
+
+
+# Remove the timestamp resolver so scalars like 2024-01-01 stay as strings.
+for ch, resolvers in list(_NoDatesSafeLoader.yaml_implicit_resolvers.items()):
+    _NoDatesSafeLoader.yaml_implicit_resolvers[ch] = [
+        (tag, regexp) for (tag, regexp) in resolvers if tag != 'tag:yaml.org,2002:timestamp'
+    ]
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -22,7 +40,7 @@ class OpenAPIService:
 
     async def import_spec(self, payload: OpenAPISpecImportRequest) -> OpenAPISpecRead:
         raw_text = await self._load_source(payload.source_type, payload.source)
-        parsed = yaml.safe_load(raw_text)
+        parsed = yaml.load(raw_text, Loader=_NoDatesSafeLoader)
         if not isinstance(parsed, dict):
             raise HTTPException(status_code=400, detail='OpenAPI source did not parse into an object')
         operations = self._extract_operations(parsed)

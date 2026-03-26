@@ -5,7 +5,7 @@ from app.api.deps import get_plugin_service
 from app.core.request_context import get_request_context
 from app.db.session import get_db
 from app.plugins.service import PluginService
-from app.providers.schemas import ProviderCreate, ProviderInvokeRequest, ProviderInvokeResponse, ProviderRead, ProviderUpdate
+from app.providers.schemas import ProviderCreate, ProviderInvokeRequest, ProviderInvokeResponse, ProviderModelListResponse, ProviderModelPreviewRequest, ProviderRead, ProviderUpdate
 from app.providers.service import ProviderService
 
 router = APIRouter()
@@ -31,9 +31,24 @@ def update_provider(provider_id: str, payload: ProviderUpdate, db: Session = Dep
     return ProviderService(db, plugin_service).update(provider_id, payload)
 
 
+@router.delete('/providers/{provider_id}')
+def delete_provider(provider_id: str, db: Session = Depends(get_db), plugin_service: PluginService = Depends(get_plugin_service)):
+    return ProviderService(db, plugin_service).delete(provider_id)
+
+
 @router.post('/providers/{provider_id}/test')
 async def test_provider(provider_id: str, db: Session = Depends(get_db), plugin_service: PluginService = Depends(get_plugin_service)):
     return await ProviderService(db, plugin_service).test(provider_id)
+
+
+@router.get('/providers/{provider_id}/models', response_model=ProviderModelListResponse)
+async def list_provider_models(provider_id: str, db: Session = Depends(get_db), plugin_service: PluginService = Depends(get_plugin_service)):
+    return await ProviderService(db, plugin_service).list_models(provider_id)
+
+
+@router.post('/providers/preview-models', response_model=ProviderModelListResponse)
+async def preview_provider_models(payload: ProviderModelPreviewRequest, db: Session = Depends(get_db), plugin_service: PluginService = Depends(get_plugin_service)):
+    return await ProviderService(db, plugin_service).preview_models(payload)
 
 
 @router.post('/providers/{provider_id}/invoke', response_model=ProviderInvokeResponse)

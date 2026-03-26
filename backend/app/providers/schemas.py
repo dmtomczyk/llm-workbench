@@ -23,6 +23,7 @@ class ProviderCreate(BaseModel):
     invoke_method: str | None = None
     invoke_path: str | None = None
     auth_strategy: AuthStrategy | None = None
+    secret_value: str | None = None
     request_template: dict[str, Any] | None = None
     response_extractors: dict[str, Any] | None = None
     capabilities: dict[str, Any] = Field(default_factory=dict)
@@ -30,10 +31,14 @@ class ProviderCreate(BaseModel):
 
 class ProviderUpdate(BaseModel):
     name: str | None = None
+    kind: str | None = None
     default_model: str | None = None
     base_url: str | None = None
     enabled: bool | None = None
+    spec_id: str | None = None
     auth_strategy: AuthStrategy | None = None
+    secret_value: str | None = None
+    clear_saved_secret: bool | None = None
     request_template: dict[str, Any] | None = None
     response_extractors: dict[str, Any] | None = None
     capabilities: dict[str, Any] | None = None
@@ -76,3 +81,18 @@ class ProviderInvokeResponse(BaseModel):
     data: dict[str, Any]
     audit_id: str | None = None
     correlation_id: str
+
+
+class ProviderModelListResponse(BaseModel):
+    ok: bool
+    provider_id: str
+    models: list[str] = Field(default_factory=list)
+    source: str | None = None
+    message: str | None = None
+
+
+class ProviderModelPreviewRequest(BaseModel):
+    kind: str
+    base_url: str | None = None
+    auth_strategy: AuthStrategy | None = None
+    secret_value: str | None = None

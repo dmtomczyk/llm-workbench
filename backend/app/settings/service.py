@@ -20,7 +20,13 @@ class SettingsService:
     def read(self) -> dict[str, Any]:
         config = get_settings().model_dump()
         rows = self.db.scalars(select(SettingsEntry)).all()
-        overrides = {row.key: json.loads(row.value_json) for row in rows}
+        overrides = {}
+        for row in rows:
+            value = json.loads(row.value_json)
+            if row.key.startswith('secrets.'):
+                overrides[row.key] = '**********' if value else ''
+            else:
+                overrides[row.key] = value
         return {'config': config, 'overrides': overrides}
 
     def patch(self, payload: dict[str, Any]) -> dict[str, Any]:
