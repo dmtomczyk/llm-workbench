@@ -42,9 +42,12 @@ if [[ ! -d "$FRONTEND_DIR/node_modules" ]]; then
   exit 1
 fi
 
-log "Starting backend on http://localhost:$BACKEND_PORT"
+log "Applying backend migrations"
 cd "$BACKEND_DIR"
 source "$VENV_DIR/bin/activate"
+alembic upgrade head
+
+log "Starting backend on http://localhost:$BACKEND_PORT"
 uvicorn app.main:app --reload --host "$BACKEND_HOST" --port "$BACKEND_PORT" &
 BACKEND_PID=$!
 deactivate

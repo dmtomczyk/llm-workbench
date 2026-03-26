@@ -130,9 +130,14 @@ cat <<EOF
 Bootstrap complete.
 
 Next steps:
+  Apply DB migrations:
+    cd "$ROOT_DIR"
+    ./migrate.sh
+
   Backend:
     cd "$BACKEND_DIR"
     source .venv/bin/activate
+    alembic upgrade head
     uvicorn app.main:app --reload --host 0.0.0.0 --port 8080
 
   Frontend:
