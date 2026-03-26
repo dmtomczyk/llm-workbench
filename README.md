@@ -36,6 +36,19 @@ Current caveats:
 - security posture is aimed at trusted local/private deployments first
 - token budgeting is heuristic, not tokenizer-exact
 
+## Screenshots
+
+Local UI screenshots live in:
+
+- `docs/screenshots/`
+
+Suggested shots include:
+- chat
+- providers
+- workbench
+- workflows
+- automations
+
 ## Intended deployment model
 
 Right now BRIDGE should be treated as:
