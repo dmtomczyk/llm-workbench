@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 
 import { Layout } from './components/Layout';
 import { AuditPage } from './features/audit/AuditPage';
+import { AutomationsPage } from './features/automations/AutomationsPage';
 import { ChatPage } from './features/chat/ChatPage';
 import { ConnectorsPage } from './features/connectors/ConnectorsPage';
 import { DashboardPage } from './features/dashboard/DashboardPage';
@@ -10,6 +11,7 @@ import { PluginsPage } from './features/plugins/PluginsPage';
 import { ProvidersPage } from './features/providers/ProvidersPage';
 import { SettingsPage } from './features/settings/SettingsPage';
 import { WorkbenchPage } from './features/workbench/WorkbenchPage';
+import { WorkflowsPage } from './features/workflows/WorkflowsPage';
 
 export function App() {
   return (
@@ -20,8 +22,8 @@ export function App() {
         <Route path="/workbench" element={<WorkbenchPage />} />
         <Route path="/providers" element={<ProvidersPage />} />
         <Route path="/connectors" element={<ConnectorsPage />} />
-        <Route path="/workflows" element={<PlaceholderPage title="Workflows" body="Workflow editor and runner are scaffolded conceptually but not built yet." />} />
-        <Route path="/automations" element={<PlaceholderPage title="Automations" body="APScheduler-backed job orchestration comes after the workbench slice." />} />
+        <Route path="/workflows" element={<WorkflowsPage />} />
+        <Route path="/automations" element={<AutomationsPage />} />
         <Route path="/audit" element={<AuditPage />} />
         <Route path="/plugins" element={<PluginsPage />} />
         <Route path="/settings" element={<SettingsPage />} />

@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
+from app.automations.runtime import AutomationRuntime
 from app.chat.service import ChatService
 from app.core.config import get_settings
 from app.core.request_context import RequestContextMiddleware
@@ -33,7 +34,16 @@ async def lifespan(app: FastAPI):
         ChatService(db, provider_service).seed_defaults()
     finally:
         db.close()
-    yield
+    automation_runtime = None
+    if settings.scheduler.enabled:
+        automation_runtime = AutomationRuntime(plugin_service)
+        automation_runtime.start()
+        app.state.automation_runtime = automation_runtime
+    try:
+        yield
+    finally:
+        if automation_runtime is not None:
+            await automation_runtime.stop()
 
 
 settings = get_settings()

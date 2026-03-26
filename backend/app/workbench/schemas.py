@@ -22,3 +22,26 @@ class WorkbenchRunResponse(BaseModel):
     audit_id: str | None = None
     rendered_prompt: dict[str, Any]
     provider_result: dict[str, Any]
+
+
+class WorkbenchRunStepRead(BaseModel):
+    id: str
+    step_index: int
+    step_type: str
+    step_name: str
+    status: str
+    input_json: dict[str, Any] | None = None
+    output_json: dict[str, Any] | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    error_text: str | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
+    created_at: str
+
+
+class WorkbenchRunStatusResponse(BaseModel):
+    ok: bool
+    run: dict[str, Any]
+    steps: list[WorkbenchRunStepRead] = Field(default_factory=list)
+    rendered_prompt: dict[str, Any] | None = None
+    provider_result: dict[str, Any] | None = None
