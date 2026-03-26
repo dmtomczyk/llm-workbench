@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -73,6 +74,15 @@ class LLMProviderPlugin(BasePlugin):
     @abstractmethod
     async def invoke(self, request: dict[str, Any], context: ExecutionContext) -> ExecutionResult:
         raise NotImplementedError
+
+    async def invoke_stream(self, request: dict[str, Any], context: ExecutionContext) -> AsyncIterator[dict[str, Any]]:
+        result = await self.invoke(request, context)
+        text = ''
+        if result.payload and result.payload.items:
+            text = str(result.payload.items[0].get('text') or '')
+        if text:
+            yield {'event': 'delta', 'delta': text}
+        yield {'event': 'done', 'result': result}
 
 
 class TransformerPlugin(BasePlugin):

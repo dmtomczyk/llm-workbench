@@ -16,6 +16,7 @@ button, input, select, textarea {
   background: #161b22;
   color: #e6edf3;
 }
+input, select, textarea { width: 100%; min-width: 0; }
 button { cursor: pointer; }
 
 .shell {
@@ -49,6 +50,8 @@ button { cursor: pointer; }
   gap: 0.2rem;
 }
 .content { padding: 1.5rem; }
+.main { min-height: 100vh; }
+.content { min-height: 0; overflow: hidden; }
 .stack { display: grid; gap: 1rem; }
 .grid { display: grid; gap: 1rem; }
 .cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -68,6 +71,29 @@ button { cursor: pointer; }
 .table { width: 100%; border-collapse: collapse; }
 .table th, .table td { text-align: left; padding: 0.7rem; border-bottom: 1px solid #21262d; }
 .chat-layout { grid-template-columns: 340px 1fr; }
+.chat-page {
+  min-height: calc(100vh - 120px);
+  height: calc(100vh - 120px);
+  align-items: stretch;
+}
+.chat-page > * { min-width: 0; }
+.chat-sidebar {
+  min-height: 0;
+  max-height: calc(100vh - 140px);
+  align-content: start;
+  overflow: auto;
+}
+.chat-sidebar .card,
+.chat-main-panel {
+  min-width: 0;
+}
+.chat-main-panel {
+  min-height: 0;
+  height: calc(100vh - 140px);
+  max-height: calc(100vh - 140px);
+  overflow: hidden;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
 .chat-header-controls {
   padding-bottom: 0.5rem;
   border-bottom: 1px solid #21262d;
@@ -85,11 +111,22 @@ button { cursor: pointer; }
 }
 .session-button.active { border-color: #58a6ff; }
 .chat-transcript {
-  min-height: 420px;
-  max-height: 65vh;
+  min-height: 0;
+  height: 100%;
+  max-height: none;
   overflow: auto;
   display: grid;
   gap: 0.9rem;
+  padding-right: 0.25rem;
+}
+.chat-composer {
+  margin-top: auto;
+  border-top: 1px solid #21262d;
+  padding-top: 0.85rem;
+}
+.chat-composer textarea {
+  min-height: 110px;
+  resize: vertical;
 }
 .message {
   border: 1px solid #30363d;
@@ -114,6 +151,19 @@ button { cursor: pointer; }
 }
 .streaming-message {
   border-style: dashed;
+}
+.chat-context-banner {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid #30363d;
+  border-radius: 0.7rem;
+  background: #11161d;
+  color: #c9d1d9;
+}
+.chat-context-banner.warning {
+  border-color: #9e6a03;
+  background: #231a05;
 }
 .wrap {
   flex-wrap: wrap;

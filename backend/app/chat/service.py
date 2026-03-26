@@ -7,6 +7,8 @@ from typing import AsyncIterator
 from uuid import uuid4
 
 from fastapi import HTTPException
+from math import ceil
+
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
@@ -226,32 +228,96 @@ class ChatService:
 
     async def stream_complete_events(self, session_id: str, payload: ChatCompleteRequest) -> AsyncIterator[str]:
         try:
-            result = await self._complete_impl(session_id, payload, action_prefix='chat.stream')
+            session, user_message, provider_messages, context_info, run, selected_model = self._prepare_completion(session_id, payload, action_prefix='chat.stream')
             yield self._sse(
                 'metadata',
                 {
-                    'sessionId': result.session.id,
-                    'runId': result.run_id,
-                    'auditId': result.audit_id,
-                    'messageId': result.assistant_message.id,
+                    'sessionId': session.id,
+                    'runId': run.id,
+                    'contextInfo': context_info,
+                    'messageId': None,
                 },
             )
             cumulative = ''
-            for chunk in self._chunk_text(result.assistant_message.content):
-                cumulative += chunk
-                yield self._sse('chunk', {'delta': chunk, 'content': cumulative})
+            finalized = None
+            async for event in self.provider_service.invoke_stream(
+                session.provider_id,
+                {
+                    'run_id': run.id,
+                    'model': selected_model,
+                    'messages': provider_messages,
+                    'max_output_tokens': context_info.get('max_output_tokens'),
+                },
+            ):
+                event_type = event.get('event')
+                if event_type == 'delta':
+                    delta = str(event.get('delta') or '')
+                    cumulative += delta
+                    yield self._sse('chunk', {'delta': delta, 'content': cumulative, 'contextInfo': context_info})
+                elif event_type == 'error':
+                    self._mark_run_failed(run, session, 'chat.stream', event.get('message') or 'Streaming provider invocation failed', status_code=500)
+                    yield self._sse('error', self._error_payload(event.get('detail') or event.get('message') or 'Streaming provider invocation failed', status_code=500))
+                    return
+                elif event_type == 'finalized':
+                    finalized = event
+            if finalized is None:
+                finalized = {
+                    'summary': 'Provider streaming completed',
+                    'status': 'success',
+                    'payload': {'type': 'text_bundle', 'title': 'LLM output', 'items': [{'name': 'response.txt', 'text': cumulative}], 'metadata': {}},
+                    'raw': {'text': cumulative},
+                    'metrics': {},
+                    'warnings': [],
+                    'audit_id': None,
+                    'run_id': run.id,
+                }
+            provider_result = {
+                'summary': finalized.get('summary'),
+                'status': finalized.get('status'),
+                'payload': finalized.get('payload'),
+                'raw': finalized.get('raw'),
+                'metrics': finalized.get('metrics'),
+                'warnings': finalized.get('warnings'),
+                'audit_id': finalized.get('audit_id'),
+                'run_id': run.id,
+                'context_info': context_info,
+            }
+            assistant_text = cumulative or self._assistant_text(provider_result)
+            assistant_message = self.add_message(
+                session.id,
+                ChatMessageCreate(role='assistant', content=assistant_text, metadata={'provider_result_status': provider_result.get('status')}),
+                run_id=run.id,
+            )
+            session.model_name = payload.model or session.model_name
+            session.updated_at = datetime.now(UTC).isoformat()
+            self.db.add(session)
+            self.db.commit()
+            audit = self.audit.record(
+                AuditEventCreate(
+                    action='chat.stream_finished',
+                    entity_type='chat_session',
+                    entity_id=session.id,
+                    session_id=session.id,
+                    run_id=run.id,
+                    status='success' if provider_result.get('status') == 'success' else 'failed',
+                    after={'assistant_message_id': assistant_message.id, 'provider_status': provider_result.get('status'), 'context_info': context_info},
+                )
+            )
             yield self._sse(
                 'done',
                 {
-                    'sessionId': result.session.id,
-                    'runId': result.run_id,
-                    'auditId': result.audit_id,
-                    'messageId': result.assistant_message.id,
-                    'content': result.assistant_message.content,
+                    'sessionId': session.id,
+                    'runId': run.id,
+                    'auditId': audit.id,
+                    'messageId': assistant_message.id,
+                    'content': assistant_message.content,
+                    'contextInfo': context_info,
                 },
             )
+        except HTTPException as exc:
+            yield self._sse('error', self._error_payload(exc.detail, status_code=exc.status_code))
         except Exception as exc:  # noqa: BLE001
-            yield self._sse('error', {'message': str(exc)})
+            yield self._sse('error', self._error_payload(exc))
 
     def export_transcript(self, session_id: str, export_format: str = 'markdown') -> tuple[str, str, str]:
         session = self._session_row(session_id)
@@ -280,52 +346,30 @@ class ChatService:
         return body, media_type, filename
 
     async def _complete_impl(self, session_id: str, payload: ChatCompleteRequest, action_prefix: str) -> CompletionResult:
-        session = self._session_row(session_id)
-        user_message = None
-        if payload.content and payload.content.strip():
-            user_message = self.add_message(
-                session.id,
-                ChatMessageCreate(role='user', content=payload.content.strip(), metadata=payload.metadata),
+        session, user_message, provider_messages, context_info, run, selected_model = self._prepare_completion(session_id, payload, action_prefix)
+        try:
+            provider_result = await self.provider_service.invoke(
+                session.provider_id,
+                {
+                    'run_id': run.id,
+                    'model': selected_model,
+                    'messages': provider_messages,
+                    'max_output_tokens': context_info.get('max_output_tokens'),
+                },
             )
-        messages = self.list_messages(session.id)
-        if not messages and not session.system_prompt:
-            raise HTTPException(status_code=400, detail='Chat session has no messages to complete')
-        provider_messages: list[dict[str, str]] = []
-        if session.system_prompt:
-            provider_messages.append({'role': 'system', 'content': session.system_prompt})
-        provider_messages.extend({'role': message.role, 'content': message.content} for message in messages)
-        run = Run(
-            id=f'run_{uuid4().hex}',
-            run_type='chat_completion',
-            source='ui',
-            status='running',
-            provider_id=session.provider_id,
-            summary=f'Chat completion for {session.id}',
-            started_at=datetime.now(UTC).isoformat(),
-            metadata_json=json.dumps(
-                {'chat_session_id': session.id, 'message_count': len(provider_messages), 'mode': action_prefix}
-            ),
-        )
-        self.db.add(run)
-        self.db.commit()
-        self.audit.record(
-            AuditEventCreate(
-                action=f'{action_prefix}_started',
-                entity_type='chat_session',
-                entity_id=session.id,
-                session_id=session.id,
-                run_id=run.id,
-                after={'provider_id': session.provider_id, 'message_count': len(provider_messages)},
-            )
-        )
-        provider_result = await self.provider_service.invoke(
-            session.provider_id,
-            {
+        except HTTPException as exc:
+            self._mark_run_failed(run, session, action_prefix, exc.detail, status_code=exc.status_code)
+            raise
+        except Exception as exc:  # noqa: BLE001
+            detail = {
+                'message': str(exc) or 'Provider invocation failed',
+                'type': exc.__class__.__name__,
                 'run_id': run.id,
-                'model': payload.model or session.model_name,
-                'messages': provider_messages,
-            },
-        )
+                'provider_id': session.provider_id,
+            }
+            self._mark_run_failed(run, session, action_prefix, detail, status_code=500)
+            raise HTTPException(status_code=500, detail=detail) from exc
+        provider_result['context_info'] = context_info
         assistant_text = self._assistant_text(provider_result)
         assistant_message = self.add_message(
             session.id,
@@ -348,7 +392,7 @@ class ChatService:
                 session_id=session.id,
                 run_id=run.id,
                 status='success' if provider_result.get('status') == 'success' else 'failed',
-                after={'assistant_message_id': assistant_message.id, 'provider_status': provider_result.get('status')},
+                after={'assistant_message_id': assistant_message.id, 'provider_status': provider_result.get('status'), 'context_info': context_info},
             )
         )
         return CompletionResult(
@@ -360,11 +404,122 @@ class ChatService:
             provider_result=provider_result,
         )
 
+    def _prepare_completion(self, session_id: str, payload: ChatCompleteRequest, action_prefix: str) -> tuple[ChatSession, ChatMessageRead | None, list[dict[str, str]], dict[str, int | bool | None], Run, str | None]:
+        session = self._session_row(session_id)
+        user_message = None
+        if payload.content and payload.content.strip():
+            user_message = self.add_message(
+                session.id,
+                ChatMessageCreate(role='user', content=payload.content.strip(), metadata=payload.metadata),
+            )
+        messages = self.list_messages(session.id)
+        if not messages and not session.system_prompt:
+            raise HTTPException(status_code=400, detail='Chat session has no messages to complete')
+        provider = self._provider_row(session.provider_id)
+        selected_model = payload.model or session.model_name or provider.default_model
+        provider_messages, context_info = self._build_provider_messages(
+            session.system_prompt,
+            messages,
+            provider,
+            selected_model,
+        )
+        run = Run(
+            id=f'run_{uuid4().hex}',
+            run_type='chat_completion',
+            source='ui',
+            status='running',
+            provider_id=session.provider_id,
+            summary=f'Chat completion for {session.id}',
+            started_at=datetime.now(UTC).isoformat(),
+            metadata_json=json.dumps(
+                {
+                    'chat_session_id': session.id,
+                    'message_count': len(provider_messages),
+                    'mode': action_prefix,
+                    'context_info': context_info,
+                }
+            ),
+        )
+        self.db.add(run)
+        self.db.commit()
+        self.audit.record(
+            AuditEventCreate(
+                action=f'{action_prefix}_started',
+                entity_type='chat_session',
+                entity_id=session.id,
+                session_id=session.id,
+                run_id=run.id,
+                after={'provider_id': session.provider_id, 'message_count': len(provider_messages), 'context_info': context_info},
+            )
+        )
+        return session, user_message, provider_messages, context_info, run, selected_model
+
     def _session_row(self, session_id: str) -> ChatSession:
         row = self.db.get(ChatSession, session_id)
         if row is None:
             raise HTTPException(status_code=404, detail='Chat session not found')
         return row
+
+    def _build_provider_messages(
+        self,
+        system_prompt: str | None,
+        messages: list[ChatMessageRead],
+        provider: LLMProvider,
+        model: str | None,
+    ) -> tuple[list[dict[str, str]], dict[str, int | bool | None]]:
+        capabilities = json.loads(provider.capabilities_json or '{}') if provider.capabilities_json else {}
+        model_settings = ((capabilities.get('model_settings') or {}) if isinstance(capabilities, dict) else {})
+        selected_settings = model_settings.get(model or '', {}) if isinstance(model_settings, dict) and model else {}
+        context_window = selected_settings.get('context_window') if isinstance(selected_settings, dict) else None
+        max_output_tokens = selected_settings.get('max_output_tokens') if isinstance(selected_settings, dict) else None
+
+        provider_messages: list[dict[str, str]] = []
+        if system_prompt:
+            provider_messages.append({'role': 'system', 'content': system_prompt})
+
+        if not context_window:
+            provider_messages.extend({'role': message.role, 'content': message.content} for message in messages)
+            return provider_messages, {
+                'context_window': None,
+                'max_output_tokens': max_output_tokens if isinstance(max_output_tokens, int) else None,
+                'trimmed': False,
+                'estimated_input_tokens': self._estimate_messages_tokens(provider_messages),
+                'messages_included': len(messages),
+                'messages_total': len(messages),
+            }
+
+        reserve = max_output_tokens if isinstance(max_output_tokens, int) and max_output_tokens > 0 else max(1024, int(context_window * 0.2))
+        input_budget = max(512, int(context_window) - reserve)
+        system_tokens = self._estimate_text_tokens(system_prompt or '') if system_prompt else 0
+        running_tokens = system_tokens
+        kept: list[ChatMessageRead] = []
+        for message in reversed(messages):
+            message_tokens = self._estimate_text_tokens(message.content)
+            if kept and running_tokens + message_tokens > input_budget:
+                break
+            if not kept and running_tokens + message_tokens > input_budget:
+                kept.append(message)
+                running_tokens += message_tokens
+                break
+            kept.append(message)
+            running_tokens += message_tokens
+        kept.reverse()
+        provider_messages.extend({'role': message.role, 'content': message.content} for message in kept)
+        return provider_messages, {
+            'context_window': int(context_window),
+            'max_output_tokens': max_output_tokens if isinstance(max_output_tokens, int) else None,
+            'trimmed': len(kept) < len(messages),
+            'estimated_input_tokens': self._estimate_messages_tokens(provider_messages),
+            'messages_included': len(kept),
+            'messages_total': len(messages),
+        }
+
+    @staticmethod
+    def _estimate_text_tokens(text: str) -> int:
+        return max(1, ceil(len(text) / 4)) if text else 0
+
+    def _estimate_messages_tokens(self, messages: list[dict[str, str]]) -> int:
+        return sum(self._estimate_text_tokens(message.get('content', '')) + 4 for message in messages)
 
     def _provider_row(self, provider_id: str) -> LLMProvider:
         row = self.db.get(LLMProvider, provider_id)
@@ -411,6 +566,25 @@ class ChatService:
             created_at=row.created_at,
         )
 
+    def _mark_run_failed(self, run: Run, session: ChatSession, action_prefix: str, detail: object, status_code: int = 500) -> None:
+        run.status = 'failed'
+        run.finished_at = datetime.now(UTC).isoformat()
+        run.error_text = self._error_summary(detail)
+        self.db.add(run)
+        self.db.commit()
+        self.audit.record(
+            AuditEventCreate(
+                action=f'{action_prefix}_finished',
+                entity_type='chat_session',
+                entity_id=session.id,
+                session_id=session.id,
+                run_id=run.id,
+                status='failed',
+                message=run.error_text,
+                after={'provider_status': 'failed', 'status_code': status_code, 'error': self._error_payload(detail, status_code=status_code)},
+            )
+        )
+
     @staticmethod
     def _assistant_text(provider_result: dict) -> str:
         payload = provider_result.get('payload') or {}
@@ -429,6 +603,28 @@ class ChatService:
         if chunks:
             return '\n\n'.join(chunks)
         return provider_result.get('summary') or '(no assistant output)'
+
+    @staticmethod
+    def _error_summary(detail: object) -> str:
+        if isinstance(detail, dict):
+            for key in ('message', 'detail', 'error'):
+                value = detail.get(key)
+                if value:
+                    return str(value)
+            return json.dumps(detail, ensure_ascii=False)
+        return str(detail)
+
+    @classmethod
+    def _error_payload(cls, detail: object, status_code: int | None = None) -> dict:
+        payload = {
+            'message': cls._error_summary(detail) or 'Request failed',
+            'statusCode': status_code,
+        }
+        if isinstance(detail, dict):
+            payload['detail'] = detail
+        elif detail is not None:
+            payload['detail'] = {'raw': str(detail)}
+        return payload
 
     @staticmethod
     def _chunk_text(text: str, chunk_size: int = 32) -> list[str]:
