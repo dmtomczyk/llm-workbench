@@ -75,6 +75,20 @@ export function SettingsPage() {
       </div>
 
       <div className="card stack">
+        <h2>Model limits & context behavior</h2>
+        <p className="muted">These settings are configured per provider/model on the Providers page and surfaced in Chat. They help BRIDGE make safer request-shaping choices for long conversations.</p>
+        <ul className="list compact-list">
+          <li><strong>Context window</strong>: the estimated maximum total tokens a model can accept for a request. BRIDGE uses this as a budgeting hint for chat history replay.</li>
+          <li><strong>Max output tokens</strong>: the desired upper bound for generated output. For supported providers, BRIDGE passes this through as a request parameter.</li>
+          <li><strong>Current chat behavior</strong>: BRIDGE replays saved chat history on each turn, estimates input token usage, and trims older messages when a configured context window would likely be exceeded.</li>
+          <li><strong>What gets trimmed first</strong>: the oldest chat messages. Newer turns and the system prompt are prioritized.</li>
+          <li><strong>Token estimates</strong>: current estimates are heuristic, not tokenizer-accurate. They are intended for rough budgeting and visibility, not exact billing math.</li>
+          <li><strong>When to configure these</strong>: especially useful for providers/models with very different context windows, small local models, and any setup where long chats may otherwise fail unexpectedly.</li>
+          <li><strong>What this does not yet do</strong>: BRIDGE does not yet summarize dropped history automatically or do exact tokenizer-specific preflight accounting.</li>
+        </ul>
+      </div>
+
+      <div className="card stack">
         <h2>Runtime settings snapshot</h2>
         {!settingsInfo ? <p className="muted">Loading…</p> : (
           <>

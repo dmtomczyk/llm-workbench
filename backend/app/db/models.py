@@ -176,6 +176,30 @@ class ScheduledJob(Base, TimestampTextMixin):
     next_run_at: Mapped[str | None] = mapped_column(Text)
 
 
+class Automation(Base, TimestampTextMixin):
+    __tablename__ = "automation"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    enabled: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    schedule_type: Mapped[str] = mapped_column(Text, nullable=False)
+    interval_seconds: Mapped[int | None] = mapped_column(Integer)
+    run_at: Mapped[str | None] = mapped_column(Text)
+    time_of_day: Mapped[str | None] = mapped_column(Text)
+    timezone: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'America/New_York'"))
+    target_type: Mapped[str] = mapped_column(Text, nullable=False)
+    workflow_id: Mapped[str | None] = mapped_column(Text)
+    provider_id: Mapped[str | None] = mapped_column(Text)
+    template_id: Mapped[str | None] = mapped_column(Text)
+    dataset_id: Mapped[str | None] = mapped_column(Text)
+    model: Mapped[str | None] = mapped_column(Text)
+    system_prompt: Mapped[str | None] = mapped_column(Text)
+    prompt_text: Mapped[str | None] = mapped_column(Text)
+    variables_json: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'{}'"))
+    last_run_at: Mapped[str | None] = mapped_column(Text)
+    next_run_at: Mapped[str | None] = mapped_column(Text)
+
+
 class Run(Base):
     __tablename__ = "run"
     __table_args__ = (

@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.routes import audit, chat, connectors, health, imports, openapi_specs, plugins, providers, settings, templates, workbench
+from app.api.routes import audit, automations, chat, connectors, health, imports, openapi_specs, plugins, providers, settings, templates, workbench, workflows
 
 api_router = APIRouter()
 api_router.include_router(health.router, tags=['health'])
@@ -11,6 +11,8 @@ api_router.include_router(chat.router, tags=['chat'])
 api_router.include_router(imports.router, tags=['imports'])
 api_router.include_router(templates.router, tags=['templates'])
 api_router.include_router(workbench.router, tags=['workbench'])
+api_router.include_router(workflows.router, tags=['workflows'])
+api_router.include_router(automations.router, tags=['automations'])
 api_router.include_router(openapi_specs.router, tags=['openapi'])
 api_router.include_router(connectors.router, tags=['connectors'])
 api_router.include_router(audit.router, tags=['audit'])

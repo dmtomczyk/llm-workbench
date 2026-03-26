@@ -16,12 +16,18 @@ class GenericOpenAPIProviderPlugin(LLMProviderPlugin):
             return {'ok': False, 'message': 'base_url is not configured'}
         if not self.config.get('invoke_path'):
             return {'ok': False, 'message': 'invoke_path is not configured'}
+        auth_error = self._auth_error()
+        if auth_error:
+            return {'ok': False, 'message': auth_error}
         return {'ok': True, 'message': 'Configuration looks valid'}
 
     async def invoke(self, request: dict[str, Any], context: ExecutionContext) -> ExecutionResult:
         base_url = self.config.get('base_url')
         method = (self.config.get('invoke_method') or 'POST').upper()
         invoke_path = self.config.get('invoke_path') or '/'
+        auth_error = self._auth_error()
+        if auth_error:
+            return ExecutionResult(status='failed', summary='Provider auth is misconfigured', error=auth_error)
         rendered = self._render_template(self.config.get('request_template') or {}, request)
         headers = rendered.get('headers') or {}
         headers.update(self._auth_headers())
@@ -71,13 +77,61 @@ class GenericOpenAPIProviderPlugin(LLMProviderPlugin):
     def _auth_headers(self) -> dict[str, str]:
         auth = self.config.get('auth_strategy') or {}
         secret_alias = auth.get('secret_alias')
-        secret_value = os.environ.get(secret_alias, '') if secret_alias else ''
+        secret_value = auth.get('secret_value') or (os.environ.get(secret_alias, '') if secret_alias else '')
         auth_type = auth.get('type')
         if auth_type == 'bearer' and secret_value:
             return {'Authorization': f'Bearer {secret_value}'}
         if auth_type == 'custom_header' and secret_value:
             return {auth.get('header_name') or 'X-API-Key': secret_value}
         return {}
+
+    def _auth_error(self) -> str | None:
+        auth = self.config.get('auth_strategy') or {}
+        auth_type = auth.get('type')
+        secret_alias = auth.get('secret_alias')
+        spec_context = self.config.get('spec_context') or {}
+        requirement = self._describe_auth_requirement(spec_context)
+
+        if auth_type == 'bearer':
+            if not secret_alias:
+                return self._format_auth_error('Bearer auth is configured but no secret alias is set.', requirement)
+            if not (auth.get('secret_value') or os.environ.get(secret_alias)):
+                return self._format_auth_error(
+                    f'Bearer auth expects either a saved token or environment variable {secret_alias!r}, but neither is set. BRIDGE sends Authorization: Bearer <token> using the saved token or the value of that env var.',
+                    requirement,
+                )
+            return None
+
+        if requirement == 'bearer_header':
+            return self._format_auth_error(
+                'This OpenAPI operation requires bearer authentication in the Authorization header, but the provider auth strategy is not configured as bearer.',
+                requirement,
+            )
+
+        return None
+
+    def _describe_auth_requirement(self, spec_context: dict[str, Any]) -> str | None:
+        requirements = spec_context.get('operation_security')
+        if requirements is None:
+            requirements = spec_context.get('global_security')
+        if not requirements:
+            return None
+        schemes = spec_context.get('security_schemes') or {}
+        for requirement in requirements:
+            if not isinstance(requirement, dict):
+                continue
+            for scheme_name in requirement.keys():
+                scheme = schemes.get(scheme_name) or {}
+                if scheme.get('type') == 'http' and str(scheme.get('scheme') or '').lower() == 'bearer':
+                    if str(scheme.get('in') or 'header').lower() == 'header':
+                        return 'bearer_header'
+        return None
+
+    @staticmethod
+    def _format_auth_error(message: str, requirement: str | None) -> str:
+        if requirement == 'bearer_header':
+            return f'{message} Required auth from imported spec: bearer token in Authorization header.'
+        return message
 
     def _extract_value(self, raw: Any, path: str | None) -> Any:
         if not path:
