@@ -57,6 +57,7 @@ class ChatCompleteRequest(BaseModel):
     content: str | None = None
     model: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    regenerate: bool = False
 
 
 class ChatCompleteResponse(BaseModel):

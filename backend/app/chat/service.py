@@ -186,6 +186,15 @@ class ChatService:
         ).all()
         return [self._message_to_read(row) for row in rows]
 
+    def list_messages_for_completion(self, session_id: str, regenerate: bool = False) -> list[ChatMessageRead]:
+        messages = self.list_messages(session_id)
+        if not regenerate:
+            return messages
+        trimmed = list(messages)
+        while trimmed and trimmed[-1].role == 'assistant':
+            trimmed.pop()
+        return trimmed
+
     def add_message(self, session_id: str, payload: ChatMessageCreate, run_id: str | None = None) -> ChatMessageRead:
         session = self._session_row(session_id)
         sequence_no = self._next_sequence_no(session.id)
@@ -260,6 +269,32 @@ class ChatService:
                     cumulative += delta
                     yield self._sse('chunk', {'delta': delta, 'content': cumulative, 'contextInfo': context_info})
                 elif event_type == 'error':
+                    if cumulative.strip():
+                        partial_message = self.add_message(
+                            session.id,
+                            ChatMessageCreate(
+                                role='assistant',
+                                content=cumulative,
+                                metadata={
+                                    'provider_result_status': 'partial',
+                                    'stream_interrupted': True,
+                                    'regenerated': payload.regenerate,
+                                    'grounding_dataset_ids': context_info.get('grounding_dataset_ids') or [],
+                                    'grounded': context_info.get('grounded') or False,
+                                },
+                            ),
+                            run_id=run.id,
+                        )
+                        session.updated_at = datetime.now(UTC).isoformat()
+                        self.db.add(session)
+                        self.db.commit()
+                        self._mark_run_failed(run, session, 'chat.stream', event.get('message') or 'Streaming provider invocation failed', status_code=500)
+                        yield self._sse('error', {
+                            **self._error_payload(event.get('detail') or event.get('message') or 'Streaming provider invocation failed', status_code=500),
+                            'messageId': partial_message.id,
+                            'content': cumulative,
+                        })
+                        return
                     self._mark_run_failed(run, session, 'chat.stream', event.get('message') or 'Streaming provider invocation failed', status_code=500)
                     yield self._sse('error', self._error_payload(event.get('detail') or event.get('message') or 'Streaming provider invocation failed', status_code=500))
                     return
@@ -288,9 +323,17 @@ class ChatService:
                 'context_info': context_info,
             }
             assistant_text = cumulative or self._assistant_text(provider_result)
+            assistant_metadata = {
+                'provider_result_status': provider_result.get('status'),
+                'regenerated': payload.regenerate,
+                'grounding_dataset_ids': context_info.get('grounding_dataset_ids') or [],
+                'grounded': context_info.get('grounded') or False,
+            }
+            if cumulative and finalized is None:
+                assistant_metadata['stream_interrupted'] = True
             assistant_message = self.add_message(
                 session.id,
-                ChatMessageCreate(role='assistant', content=assistant_text, metadata={'provider_result_status': provider_result.get('status')}),
+                ChatMessageCreate(role='assistant', content=assistant_text, metadata=assistant_metadata),
                 run_id=run.id,
             )
             session.model_name = payload.model or session.model_name
@@ -412,12 +455,16 @@ class ChatService:
     def _prepare_completion(self, session_id: str, payload: ChatCompleteRequest, action_prefix: str) -> tuple[ChatSession, ChatMessageRead | None, list[dict[str, str]], dict[str, int | bool | None], Run, str | None]:
         session = self._session_row(session_id)
         user_message = None
+        if payload.regenerate and payload.content and payload.content.strip():
+            raise HTTPException(status_code=400, detail='Regenerate requests must not include new content.')
         if payload.content and payload.content.strip():
             user_message = self.add_message(
                 session.id,
                 ChatMessageCreate(role='user', content=payload.content.strip(), metadata=payload.metadata),
             )
-        messages = self.list_messages(session.id)
+        messages = self.list_messages_for_completion(session.id, regenerate=payload.regenerate)
+        if payload.regenerate and not any(message.role == 'user' for message in messages):
+            raise HTTPException(status_code=400, detail='Nothing to regenerate yet — this chat has no prior user message.')
         if not messages and not session.system_prompt:
             raise HTTPException(status_code=400, detail='Chat session has no messages to complete')
         if not session.provider_id:
@@ -445,6 +492,7 @@ class ChatService:
                     'message_count': len(provider_messages),
                     'mode': action_prefix,
                     'context_info': context_info,
+                    'regenerate': payload.regenerate,
                 }
             ),
         )
@@ -457,7 +505,7 @@ class ChatService:
                 entity_id=session.id,
                 session_id=session.id,
                 run_id=run.id,
-                after={'provider_id': session.provider_id, 'message_count': len(provider_messages), 'context_info': context_info},
+                after={'provider_id': session.provider_id, 'message_count': len(provider_messages), 'context_info': context_info, 'regenerate': payload.regenerate},
             )
         )
         return session, user_message, provider_messages, context_info, run, selected_model
@@ -484,6 +532,10 @@ class ChatService:
 
         provider_messages: list[dict[str, str]] = []
         grounding_message, grounding_info = self._grounding_system_message(session_metadata or {})
+        grounding_info = {
+            **grounding_info,
+            'grounding_dataset_count': len(grounding_info.get('grounding_dataset_ids') or []),
+        }
         if system_prompt:
             provider_messages.append({'role': 'system', 'content': system_prompt})
         if grounding_message:

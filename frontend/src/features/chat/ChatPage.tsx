@@ -35,6 +35,7 @@ type ChatMessage = {
   content: string;
   sequence_no: number;
   created_at: string;
+  metadata?: Record<string, unknown>;
 };
 
 type ContextInfo = {
@@ -61,6 +62,7 @@ type ChatCompleteResponse = {
 };
 
 type StreamStatus = 'idle' | 'connecting' | 'streaming' | 'finalizing' | 'cancelled' | 'error';
+type SendMode = 'send' | 'regenerate';
 
 type StreamEvent = {
   runId?: string;
@@ -197,6 +199,7 @@ export function ChatPage() {
   const [streamStatus, setStreamStatus] = useState<StreamStatus>('idle');
   const [streamStatusText, setStreamStatusText] = useState('');
   const [lastSubmittedText, setLastSubmittedText] = useState('');
+  const [lastSendMode, setLastSendMode] = useState<SendMode>('send');
   const [newProviderId, setNewProviderId] = useState('');
   const [newModelName, setNewModelName] = useState('');
   const [newSystemPrompt, setNewSystemPrompt] = useState('');
@@ -457,6 +460,7 @@ export function ChatPage() {
     if (!content) return;
     const optimisticMessage: ChatMessage = { id: `temp-user-${Date.now()}`, session_id: selectedSessionId, role: 'user', content, sequence_no: messages.length + 1, created_at: new Date().toISOString() };
     setLastSubmittedText(content);
+    setLastSendMode('send');
     setMessages((current) => [...current, optimisticMessage]);
     setSending(true);
     setError('');
@@ -465,9 +469,9 @@ export function ChatPage() {
     setStreamStatusText('');
     try {
       if (streamEnabled) {
-        await streamSend(selectedSessionId, content);
+        await streamSend(selectedSessionId, { content, regenerate: false });
       } else {
-        const result = await api<ChatCompleteResponse>(`/api/chat/sessions/${selectedSessionId}/complete`, { method: 'POST', body: JSON.stringify({ content }) });
+        const result = await api<ChatCompleteResponse>(`/api/chat/sessions/${selectedSessionId}/complete`, { method: 'POST', body: JSON.stringify({ content, regenerate: false }) });
         setLastContextInfo(result.provider_result.context_info ?? null);
         if (result.provider_result.status !== 'success') throw new Error(`Provider returned ${result.provider_result.status}: ${result.provider_result.summary}`);
       }
@@ -494,7 +498,7 @@ export function ChatPage() {
     }
   }
 
-  async function streamSend(sessionId: string, content: string) {
+  async function streamSend(sessionId: string, request: { content?: string; regenerate?: boolean }) {
     const abortController = new AbortController();
     activeStreamAbortRef.current = abortController;
     setStreamStatus('connecting');
@@ -504,7 +508,7 @@ export function ChatPage() {
       const response = await fetch(`/api/chat/sessions/${sessionId}/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify(request),
         signal: abortController.signal,
       });
       if (!response.ok || !response.body) throw new Error(await response.text() || 'Streaming request failed');
@@ -599,8 +603,51 @@ export function ChatPage() {
     activeStreamAbortRef.current?.abort();
   }
 
+  async function regenerateLastResponse() {
+    if (!selectedSessionId || sending) return;
+    setLastSendMode('regenerate');
+    setSending(true);
+    setError('');
+    setStreamingReply('');
+    setStreamStatus('idle');
+    setStreamStatusText('');
+    try {
+      if (streamEnabled) {
+        await streamSend(selectedSessionId, { regenerate: true });
+      } else {
+        const result = await api<ChatCompleteResponse>(`/api/chat/sessions/${selectedSessionId}/complete`, { method: 'POST', body: JSON.stringify({ regenerate: true }) });
+        setLastContextInfo(result.provider_result.context_info ?? null);
+        if (result.provider_result.status !== 'success') throw new Error(`Provider returned ${result.provider_result.status}: ${result.provider_result.summary}`);
+      }
+      await loadProvidersAndSessions(selectedSessionId);
+      await loadMessages(selectedSessionId);
+      setStreamingReply('');
+      setStreamStatus('idle');
+      setStreamStatusText('');
+      window.setTimeout(() => composerRef.current?.focus(), 0);
+    } catch (err) {
+      setError(formatChatError(err));
+      await loadMessages(selectedSessionId);
+      if (streamEnabled && streamingReply.trim()) {
+        setStreamStatus('error');
+        setStreamStatusText('Stream interrupted — partial regenerated response shown below.');
+      } else {
+        setStreamingReply('');
+        setStreamStatus('idle');
+        setStreamStatusText('');
+      }
+    } finally {
+      setSending(false);
+    }
+  }
+
   async function retryLastSend() {
-    if (!selectedSessionId || !lastSubmittedText.trim() || sending) return;
+    if (!selectedSessionId || sending) return;
+    if (lastSendMode === 'regenerate') {
+      await regenerateLastResponse();
+      return;
+    }
+    if (!lastSubmittedText.trim()) return;
     setComposerText(lastSubmittedText);
     const optimisticMessage: ChatMessage = {
       id: `temp-user-retry-${Date.now()}`,
@@ -618,9 +665,9 @@ export function ChatPage() {
     setStreamStatusText('');
     try {
       if (streamEnabled) {
-        await streamSend(selectedSessionId, lastSubmittedText);
+        await streamSend(selectedSessionId, { content: lastSubmittedText, regenerate: false });
       } else {
-        const result = await api<ChatCompleteResponse>(`/api/chat/sessions/${selectedSessionId}/complete`, { method: 'POST', body: JSON.stringify({ content: lastSubmittedText }) });
+        const result = await api<ChatCompleteResponse>(`/api/chat/sessions/${selectedSessionId}/complete`, { method: 'POST', body: JSON.stringify({ content: lastSubmittedText, regenerate: false }) });
         setLastContextInfo(result.provider_result.context_info ?? null);
         if (result.provider_result.status !== 'success') throw new Error(`Provider returned ${result.provider_result.status}: ${result.provider_result.summary}`);
       }
@@ -680,6 +727,7 @@ export function ChatPage() {
             <div className="row wrap">
               <button type="button" onClick={() => setShowLinkDatasetModal(true)} disabled={!selectedSession}>Link Dataset</button>
               <button type="button" onClick={() => setShowSessionSettings((current) => !current)} disabled={!selectedSession}>{showSessionSettings ? 'Hide settings' : 'Settings'}</button>
+              <button type="button" onClick={() => void regenerateLastResponse()} disabled={!selectedSession || sending}>Regenerate</button>
               <button type="button" onClick={() => exportTranscript('markdown')} disabled={!selectedSession}>Export .md</button>
               <button type="button" onClick={() => exportTranscript('txt')} disabled={!selectedSession}>Export .txt</button>
               <button type="button" onClick={() => { void onDeleteSession(); }} disabled={!selectedSession} className="danger-button">Delete</button>
@@ -721,12 +769,26 @@ export function ChatPage() {
               </span>
             </div>
           ) : null}
-          {messages.length === 0 ? <p className="muted">No messages yet.</p> : messages.map((message) => (
-            <div key={message.id} className={message.role === 'assistant' ? 'message assistant' : message.role === 'system' ? 'message system' : 'message user'}>
-              <div className="message-role">{message.role}</div>
-              <pre>{message.content}</pre>
-            </div>
-          ))}
+          {messages.length === 0 ? <p className="muted">No messages yet.</p> : messages.map((message) => {
+            const interrupted = message.role === 'assistant' && message.metadata?.stream_interrupted;
+            const regenerated = message.role === 'assistant' && message.metadata?.regenerated;
+            const groundedIds = Array.isArray(message.metadata?.grounding_dataset_ids)
+              ? (message.metadata?.grounding_dataset_ids as string[])
+              : [];
+            return (
+              <div key={message.id} className={message.role === 'assistant' ? 'message assistant' : message.role === 'system' ? 'message system' : 'message user'}>
+                <div className="message-role">{message.role}</div>
+                {(interrupted || regenerated || groundedIds.length > 0) ? (
+                  <div className="pill-row">
+                    {interrupted ? <span className="pill">Interrupted</span> : null}
+                    {regenerated ? <span className="pill">Regenerated</span> : null}
+                    {groundedIds.length > 0 ? <span className="pill">Grounded: {groundedIds.length} dataset{groundedIds.length === 1 ? '' : 's'}</span> : null}
+                  </div>
+                ) : null}
+                <pre>{message.content}</pre>
+              </div>
+            );
+          })}
           {streamingReply ? (
             <div className="message assistant streaming-message">
               <div className="message-role">
