@@ -32,3 +32,9 @@ def get_db() -> Generator[Session, None, None]:
         yield db
     finally:
         db.close()
+
+
+def open_db_session() -> Session:
+    if _SessionLocal is None:
+        raise RuntimeError("Database session factory not initialized")
+    return _SessionLocal()

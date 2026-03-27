@@ -19,6 +19,15 @@ class SettingsService:
 
     def read(self) -> dict[str, Any]:
         config = get_settings().model_dump()
+        if isinstance(config.get('auth'), dict):
+            auth_config = dict(config['auth'])
+            if auth_config.get('session_jwt_secret'):
+                auth_config['session_jwt_secret'] = '**********'
+            oidc = dict(auth_config.get('oidc') or {})
+            if oidc.get('client_secret'):
+                oidc['client_secret'] = '**********'
+            auth_config['oidc'] = oidc
+            config['auth'] = auth_config
         rows = self.db.scalars(select(SettingsEntry)).all()
         overrides = {}
         for row in rows:

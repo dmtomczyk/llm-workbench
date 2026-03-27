@@ -1,9 +1,10 @@
 from fastapi import APIRouter
 
-from app.api.routes import audit, automations, chat, connectors, health, import_recipes, imports, openapi_specs, plugins, providers, settings, templates, workbench, workflows
+from app.api.routes import audit, auth, automations, chat, connectors, health, import_recipes, imports, openapi_specs, plugins, providers, settings, templates, workbench, workflows
 
 api_router = APIRouter()
 api_router.include_router(health.router, tags=['health'])
+api_router.include_router(auth.router, tags=['auth'])
 api_router.include_router(settings.router, tags=['settings'])
 api_router.include_router(plugins.router, tags=['plugins'])
 api_router.include_router(providers.router, tags=['providers'])

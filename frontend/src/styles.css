@@ -78,6 +78,15 @@ button { cursor: pointer; }
   gap: 0.2rem;
 }
 .content { padding: 1.5rem; }
+.login-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 2rem;
+}
+.login-card {
+  width: min(460px, 100%);
+}
 .main { min-height: 100vh; }
 .content { min-height: 0; overflow: hidden; }
 .stack { display: grid; gap: 1rem; }

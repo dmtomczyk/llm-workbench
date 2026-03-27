@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
+from app.auth.middleware import AuthRequiredMiddleware
 from app.automations.runtime import AutomationRuntime
 from app.chat.service import ChatService
 from app.core.config import get_settings
@@ -56,6 +57,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(RequestContextMiddleware)
+app.add_middleware(AuthRequiredMiddleware)
 app.include_router(api_router, prefix="/api")
 
 

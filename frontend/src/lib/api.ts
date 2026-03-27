@@ -21,6 +21,7 @@ function summarizeErrorBody(body: unknown): string {
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
       ...(init?.headers ?? {}),
@@ -40,6 +41,9 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (!response.ok) {
+    if (response.status === 401) {
+      window.dispatchEvent(new CustomEvent('bridge:unauthorized'));
+    }
     const summary = summarizeErrorBody(maybeJson ?? rawText);
     throw new Error(`${response.status} ${response.statusText}: ${summary}`.trim());
   }

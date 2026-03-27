@@ -1,11 +1,13 @@
 import { ReactNode, useMemo, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 
+import { useAuth } from '../auth';
 import { NAV_SECTIONS } from '../routes/nav';
 import { ShellSubnavContext } from './shellSubnav';
 
 export function Layout() {
   const location = useLocation();
+  const auth = useAuth();
   const [subnav, setSubnav] = useState<ReactNode>(null);
   const hasSubnav = Boolean(subnav);
   const shellClassName = useMemo(() => `shell${hasSubnav ? ' shell-with-subnav' : ''}${location.pathname.startsWith('/chat') ? ' shell-chat-route' : ''}`, [hasSubnav, location.pathname]);
@@ -46,6 +48,12 @@ export function Layout() {
             <strong>BRIDGE</strong>
             <span className="muted">Grounded chat first; datasets, prompts, workflows, and automation behind it.</span>
           </div>
+          {auth.config?.enabled && auth.user ? (
+            <div className="row wrap">
+              <span className="muted">{auth.user.name || auth.user.email || auth.user.sub}</span>
+              <button type="button" onClick={() => auth.beginLogout()}>Logout</button>
+            </div>
+          ) : null}
         </header>
         <section className="content">
           <Outlet />
