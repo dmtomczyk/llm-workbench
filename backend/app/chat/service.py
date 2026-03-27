@@ -35,6 +35,22 @@ WELCOME_TEXT = (
 )
 
 
+def _parse_text_timestamp(value: str | None) -> datetime:
+    if not value:
+        return datetime.fromtimestamp(0, UTC)
+    text = value.strip()
+    try:
+        if text.endswith('Z'):
+            return datetime.fromisoformat(text.replace('Z', '+00:00'))
+        parsed = datetime.fromisoformat(text)
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+    except ValueError:
+        try:
+            return datetime.strptime(text, '%Y-%m-%d %H:%M:%S').replace(tzinfo=UTC)
+        except ValueError:
+            return datetime.fromtimestamp(0, UTC)
+
+
 @dataclass(slots=True)
 class CompletionResult:
     session: ChatSessionRead
@@ -90,19 +106,31 @@ class ChatService:
             )
 
     def list_sessions(self) -> list[ChatSessionRead]:
-        rows = self.db.scalars(select(ChatSession).order_by(desc(ChatSession.updated_at))).all()
+        rows = self.db.scalars(select(ChatSession)).all()
+        rows = sorted(
+            rows,
+            key=lambda row: (
+                _parse_text_timestamp(row.updated_at),
+                _parse_text_timestamp(row.created_at),
+                row.id,
+            ),
+            reverse=True,
+        )
         return [self._session_to_read(row) for row in rows]
 
     def create_session(self, payload: ChatSessionCreate) -> ChatSessionRead:
         provider = self.db.get(LLMProvider, payload.provider_id) if payload.provider_id else None
-        title = (payload.title or '').strip() or (f'Chat with {provider.name}' if provider else 'New chat')
+        requested_title = (payload.title or '').strip()
+        title = requested_title or 'New chat'
+        metadata = dict(payload.metadata or {})
+        metadata['title_auto'] = not bool(requested_title)
         row = ChatSession(
             id=f'chat_{uuid4().hex}',
             title=title,
             provider_id=provider.id if provider else '',
             model_name=payload.model_name or (provider.default_model if provider else None),
             system_prompt=payload.system_prompt,
-            metadata_json=json.dumps(payload.metadata or {}),
+            metadata_json=json.dumps(metadata),
         )
         self.db.add(row)
         self.db.commit()
@@ -135,14 +163,20 @@ class ChatService:
                 row.provider_id = ''
                 if payload.model_name is None:
                     row.model_name = None
+        metadata = json.loads(row.metadata_json or '{}') if row.metadata_json else {}
         if payload.title is not None:
             row.title = payload.title.strip() or row.title
+            metadata['title_auto'] = False
         if payload.model_name is not None:
             row.model_name = payload.model_name or None
         if payload.system_prompt is not None:
             row.system_prompt = payload.system_prompt or None
         if payload.metadata is not None:
-            row.metadata_json = json.dumps(payload.metadata)
+            next_metadata = dict(payload.metadata)
+            if 'title_auto' not in next_metadata:
+                next_metadata['title_auto'] = metadata.get('title_auto', False)
+            metadata = next_metadata
+        row.metadata_json = json.dumps(metadata)
         row.updated_at = datetime.now(UTC).isoformat()
         self.db.add(row)
         self.db.commit()
@@ -209,10 +243,13 @@ class ChatService:
         )
         session.message_count = sequence_no
         session.updated_at = datetime.now(UTC).isoformat()
-        if session.title.startswith('Chat with') and payload.role == 'user':
+        session_metadata = json.loads(session.metadata_json or '{}') if session.metadata_json else {}
+        if payload.role == 'user' and session_metadata.get('title_auto'):
             derived = payload.content.strip().splitlines()[0][:80]
             if derived:
                 session.title = derived
+                session_metadata['title_auto'] = False
+                session.metadata_json = json.dumps(session_metadata)
         self.db.add_all([row, session])
         self.db.commit()
         self.db.refresh(row)

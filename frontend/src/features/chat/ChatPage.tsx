@@ -24,6 +24,7 @@ type ChatSession = {
   system_prompt?: string;
   message_count: number;
   last_message_preview?: string;
+  created_at: string;
   updated_at: string;
   metadata?: Record<string, unknown>;
 };
@@ -88,8 +89,17 @@ function linkedDatasetIds(metadata: Record<string, unknown> | undefined): string
   return [];
 }
 
+function parseSessionTimestamp(value: string): number {
+  const text = value.trim();
+  const normalized = /[zZ]|[+-]\d\d:\d\d$/.test(text)
+    ? text
+    : (text.includes('T') ? `${text}Z` : `${text.replace(' ', 'T')}Z`);
+  const parsed = new Date(normalized).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 function sessionGroupLabel(updatedAt: string): string {
-  const date = new Date(updatedAt);
+  const date = new Date(parseSessionTimestamp(updatedAt));
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const target = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
@@ -98,6 +108,15 @@ function sessionGroupLabel(updatedAt: string): string {
   if (diffDays === 1) return 'Yesterday';
   if (diffDays < 7) return 'This Week';
   return 'Earlier';
+}
+
+function isAutoTitle(session: ChatSession | null | undefined): boolean {
+  return Boolean(session?.metadata && session.metadata.title_auto);
+}
+
+function displaySessionTitle(session: ChatSession | null | undefined): string {
+  if (!session) return 'Chat';
+  return session.message_count === 0 && isAutoTitle(session) ? 'New chat' : session.title;
 }
 
 function modelWarning(model: string, models: string[]): string {
@@ -246,7 +265,13 @@ export function ChatPage() {
     return datasets.filter((dataset) => dataset.name.toLowerCase().includes(q) || dataset.id.toLowerCase().includes(q));
   }, [datasets, datasetSearch]);
   const groupedSessions = useMemo(() => {
-    const sorted = [...sessions].sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+    const sorted = [...sessions].sort((a, b) => {
+      const updatedDiff = parseSessionTimestamp(b.updated_at) - parseSessionTimestamp(a.updated_at);
+      if (updatedDiff !== 0) return updatedDiff;
+      const createdDiff = parseSessionTimestamp(b.created_at) - parseSessionTimestamp(a.created_at);
+      if (createdDiff !== 0) return createdDiff;
+      return b.id.localeCompare(a.id);
+    });
     const buckets: Record<string, ChatSession[]> = { Today: [], Yesterday: [], 'This Week': [], Earlier: [] };
     for (const session of sorted) {
       buckets[sessionGroupLabel(session.updated_at)].push(session);
