@@ -202,10 +202,10 @@ function describeStreamError(data: StreamEvent): string {
   return lines.join('\n');
 }
 
-function formatGroundingLabel(names: string[]): string {
-  if (names.length === 0) return 'Grounded';
-  if (names.length <= 2) return `Grounded: ${names.join(', ')}`;
-  return `Grounded: ${names.slice(0, 2).join(', ')} +${names.length - 2} more`;
+function formatLinkedDatasetsLabel(names: string[]): string {
+  if (names.length === 0) return 'Linked Datasets';
+  if (names.length <= 2) return `Linked Datasets: ${names.join(', ')}`;
+  return `Linked Datasets: ${names.slice(0, 2).join(', ')} +${names.length - 2} more`;
 }
 
 export function ChatPage() {
@@ -221,6 +221,8 @@ export function ChatPage() {
   const [showSessionMenuModal, setShowSessionMenuModal] = useState(false);
   const [menuSessionId, setMenuSessionId] = useState('');
   const [showLinkDatasetModal, setShowLinkDatasetModal] = useState(false);
+  const [renamingSessionId, setRenamingSessionId] = useState('');
+  const [renamingTitle, setRenamingTitle] = useState('');
   const [composerText, setComposerText] = useState('');
   const [streamingReply, setStreamingReply] = useState('');
   const [streamStatus, setStreamStatus] = useState<StreamStatus>('idle');
@@ -297,9 +299,34 @@ export function ChatPage() {
                   return (
                     <li key={session.id} className="session-row-item">
                       <div className={selectedSessionId === session.id ? 'session-row active' : 'session-row'}>
-                        <button className={selectedSessionId === session.id ? 'session-button active compact-session-button' : 'session-button compact-session-button'} onClick={() => setSelectedSessionId(session.id)} type="button" title={session.title}>
-                          <strong className="session-title-line">{session.title}</strong>
-                        </button>
+                        {renamingSessionId === session.id ? (
+                          <input
+                            autoFocus
+                            value={renamingTitle}
+                            onChange={(event) => setRenamingTitle(event.target.value)}
+                            onBlur={() => void submitRenamingSession(session)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter') {
+                                event.preventDefault();
+                                void submitRenamingSession(session);
+                              } else if (event.key === 'Escape') {
+                                event.preventDefault();
+                                cancelRenamingSession();
+                              }
+                            }}
+                            placeholder="Rename chat"
+                          />
+                        ) : (
+                          <button
+                            className={selectedSessionId === session.id ? 'session-button active compact-session-button' : 'session-button compact-session-button'}
+                            onClick={() => setSelectedSessionId(session.id)}
+                            onDoubleClick={() => startRenamingSession(session)}
+                            type="button"
+                            title={session.title}
+                          >
+                            <strong className="session-title-line">{displaySessionTitle(session)}</strong>
+                          </button>
+                        )}
                         <button
                           type="button"
                           className="session-menu-button"
@@ -323,7 +350,7 @@ export function ChatPage() {
         </div>
       </div>
     </div>
-  ), [groupedSessions, selectedSessionId, sessions.length]);
+  ), [groupedSessions, selectedSessionId, sessions.length, renamingSessionId, renamingTitle]);
 
   async function ensureProviderModels(providerId: string, force = false) {
     if (!providerId) return;
@@ -424,7 +451,7 @@ export function ChatPage() {
     }
   }
 
-  async function onCreateGroundedChat(datasetId: string) {
+  async function onCreateDatasetLinkedChat(datasetId: string) {
     setError('');
     setNewLinkedDatasetIds(datasetId ? [datasetId] : []);
     try {
@@ -459,6 +486,38 @@ export function ChatPage() {
         }),
       });
       setLastContextInfo(null);
+      await loadProvidersAndSessions(updated.id);
+    } catch (err) {
+      setError(formatChatError(err));
+    }
+  }
+
+  function startRenamingSession(session: ChatSession) {
+    setRenamingSessionId(session.id);
+    setRenamingTitle(session.message_count === 0 && isAutoTitle(session) ? '' : session.title);
+    setMenuSessionId(session.id);
+    setSelectedSessionId(session.id);
+    setShowSessionMenuModal(false);
+  }
+
+  function cancelRenamingSession() {
+    setRenamingSessionId('');
+    setRenamingTitle('');
+  }
+
+  async function submitRenamingSession(session: ChatSession) {
+    const nextTitle = renamingTitle.trim();
+    if (!nextTitle) {
+      cancelRenamingSession();
+      return;
+    }
+    setError('');
+    try {
+      const updated = await api<ChatSession>(`/api/chat/sessions/${session.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ title: nextTitle }),
+      });
+      cancelRenamingSession();
       await loadProvidersAndSessions(updated.id);
     } catch (err) {
       setError(formatChatError(err));
@@ -774,8 +833,8 @@ export function ChatPage() {
         <div className="chat-header-controls stack">
           <div className="row between wrap">
             <div className="stack compact-stack">
-              <h2>{selectedSession?.title ?? 'Chat'}</h2>
-              <div className="muted">Use Chat for grounded exploration first. Link datasets, ask questions, then branch into workbench or workflows when the process becomes more structured.</div>
+              <h2>{displaySessionTitle(selectedSession)}</h2>
+              <div className="muted">Use Chat for dataset-linked exploration first. Link datasets, ask questions, then branch into workbench or workflows when the process becomes more structured.</div>
               <div className="muted">{selectedSession ? `${providers.find((provider) => provider.id === selectedSession.provider_id)?.name ?? selectedSession.provider_id} · ${selectedSession.model_name ?? 'default model'}` : 'Create or select a session'}</div>
               {lastContextInfo ? (
                 <div className="muted">
@@ -783,7 +842,7 @@ export function ChatPage() {
                   {lastContextInfo.context_window ? ` / ${lastContextInfo.context_window}` : ''}
                   {lastContextInfo.max_output_tokens ? ` · reserved out ${lastContextInfo.max_output_tokens}` : ''}
                   {lastContextInfo.trimmed ? ' · older history trimmed' : ' · full history kept'}
-                  {lastContextInfo.grounded ? ` · ${formatGroundingLabel(lastContextInfo.grounding_dataset_names ?? [])}` : ''}
+                  {lastContextInfo.grounded ? ` · ${formatLinkedDatasetsLabel(lastContextInfo.grounding_dataset_names ?? [])}` : ''}
                 </div>
               ) : null}
             </div>
@@ -797,10 +856,14 @@ export function ChatPage() {
             </div>
           </div>
 
-          <div className="row wrap">
-            {linkedDatasets.length > 0 ? linkedDatasets.map((dataset) => (
-              <span key={dataset.id} className="pill">{dataset.name}</span>
-            )) : <span className="pill">No linked datasets</span>}
+          <div className="stack compact-stack">
+            <div className="row wrap">
+              <strong>Linked Datasets:</strong>
+              {linkedDatasets.length > 0 ? linkedDatasets.map((dataset) => (
+                <span key={dataset.id} className="pill">{dataset.name}</span>
+              )) : <span className="pill">No linked datasets</span>}
+            </div>
+            {linkedDatasets.length > 0 ? <div className="muted">These datasets are included in the chat context for new responses.</div> : null}
           </div>
 
           {selectedSession && showSessionSettings ? (
@@ -824,21 +887,21 @@ export function ChatPage() {
           {!selectedSession ? (
             <div className="card stack">
               <div>
-                <h3>Start a grounded chat</h3>
-                <p className="muted">Chat is the main surface in BRIDGE. Start blank, start from a dataset, or jump back into a recent conversation.</p>
+                <h3>Start a chat</h3>
+                <p className="muted">Chat is the main surface in BRIDGE. Start blank, start with a dataset, or jump back into a recent conversation.</p>
               </div>
               {requestedDataset ? (
                 <div className="notice">
                   Ready to start from dataset <strong>{requestedDataset.name}</strong>.
                   <div className="row wrap" style={{ marginTop: '0.75rem' }}>
-                    <button type="button" onClick={() => void onCreateGroundedChat(requestedDataset.id)}>Start chat with this dataset</button>
+                    <button type="button" onClick={() => void onCreateDatasetLinkedChat(requestedDataset.id)}>Start chat with this dataset</button>
                     <a className="button-link" href="/datasets">Browse all datasets</a>
                   </div>
                 </div>
               ) : null}
               <div className="row wrap">
                 <button type="button" onClick={() => void onCreateSession()} disabled={!newProviderId}>Start blank chat</button>
-                {datasets[0] ? <button type="button" onClick={() => void onCreateGroundedChat(datasets[0].id)} disabled={!newProviderId}>Start grounded chat</button> : null}
+                {datasets[0] ? <button type="button" onClick={() => void onCreateDatasetLinkedChat(datasets[0].id)} disabled={!newProviderId}>Start with a dataset</button> : null}
                 <a className="button-link" href="/datasets">Choose a dataset first</a>
               </div>
               {sessions.length > 0 ? (
@@ -861,11 +924,11 @@ export function ChatPage() {
                 {lastContextInfo.context_window ? ` / ${lastContextInfo.context_window}` : ''}
                 {lastContextInfo.max_output_tokens ? ` · reserved out ${lastContextInfo.max_output_tokens}` : ''}
                 {typeof lastContextInfo.messages_included === 'number' && typeof lastContextInfo.messages_total === 'number' ? ` · included ${lastContextInfo.messages_included}/${lastContextInfo.messages_total} messages` : ''}
-                {lastContextInfo.grounded ? ` · ${formatGroundingLabel(lastContextInfo.grounding_dataset_names ?? [])}` : ''}
+                {lastContextInfo.grounded ? ` · ${formatLinkedDatasetsLabel(lastContextInfo.grounding_dataset_names ?? [])}` : ''}
               </span>
             </div>
           ) : null}
-          {selectedSession && messages.length === 0 ? <p className="muted">No messages yet. Ask a question, or link a dataset to ground the conversation.</p> : null}
+          {selectedSession && messages.length === 0 ? <p className="muted">No messages yet. Ask a question, or link a dataset to give the chat more context.</p> : null}
           {messages.map((message) => {
             const interrupted = message.role === 'assistant' && message.metadata?.stream_interrupted;
             const regenerated = message.role === 'assistant' && message.metadata?.regenerated;
@@ -882,7 +945,7 @@ export function ChatPage() {
                   <div className="pill-row">
                     {interrupted ? <span className="pill">Interrupted</span> : null}
                     {regenerated ? <span className="pill">Regenerated</span> : null}
-                    {groundedIds.length > 0 ? <span className="pill">{formatGroundingLabel(groundedNames)}</span> : null}
+                    {groundedIds.length > 0 ? <span className="pill">{formatLinkedDatasetsLabel(groundedNames)}</span> : null}
                   </div>
                 ) : null}
                 <pre>{message.content}</pre>
@@ -917,7 +980,7 @@ export function ChatPage() {
             <div className={streamBannerClass}>{streamStatusText}</div>
           ) : null}
           <div className="row between wrap">
-            {error ? <pre>{error}</pre> : <span className="muted">Linked datasets are injected into this session’s chat context.</span>}
+            {error ? <pre>{error}</pre> : <span className="muted">Linked datasets are included in this chat’s context.</span>}
             <div className="row wrap">
               {sending && streamEnabled ? <button type="button" onClick={cancelStreaming}>Cancel stream</button> : null}
               <button type="submit" disabled={!selectedSessionId || sending || !selectedSessionHasProvider}>{submitLabel}</button>
@@ -935,6 +998,9 @@ export function ChatPage() {
             </div>
             <div className="muted">{menuSession?.title ?? 'Selected chat session'}</div>
             <div className="stack">
+              <button type="button" onClick={() => {
+                if (menuSession) startRenamingSession(menuSession);
+              }}>Rename</button>
               <button type="button" onClick={() => {
                 if (menuSession) setSelectedSessionId(menuSession.id);
                 setShowSessionSettings(true);
