@@ -21,6 +21,7 @@ from app.imports.schemas import (
     ImportRecipeUpdate,
 )
 from app.imports.service import ImportService
+from app.imports.transforms import TransformEngine, TransformError
 
 
 class ImportRecipeService:
@@ -29,6 +30,7 @@ class ImportRecipeService:
         self.audit = AuditService(db)
         self.imports = ImportService(db)
         self.http_fetcher = HttpImportFetcher()
+        self.transforms = TransformEngine()
 
     def list_recipes(self) -> list[dict]:
         rows = self.db.scalars(select(ImportRecipe).order_by(desc(ImportRecipe.updated_at), desc(ImportRecipe.created_at))).all()
@@ -132,6 +134,10 @@ class ImportRecipeService:
             media_type=acquired['media_type'],
             format_hint=str(payload.source_config.get('response_format_hint') or 'auto'),
         )
+        try:
+            parsed = self.transforms.apply(parsed, payload.transform_rules)
+        except TransformError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         return ImportRecipePreviewResponse(
             source_type=payload.source_type,
             parser_used=parsed.parser_used,
@@ -150,6 +156,7 @@ class ImportRecipeService:
             raise HTTPException(status_code=400, detail='Import recipe is disabled')
 
         source_config = json.loads(recipe.source_config_json or '{}')
+        transform_rules = json.loads(recipe.transform_rules_json or '{}')
         self._validate_recipe_targeting(recipe.target_mode, recipe.target_dataset_id, recipe.dataset_name_template)
         self._validate_source(recipe.source_type, source_config)
 
@@ -179,6 +186,10 @@ class ImportRecipeService:
                 media_type=acquired['media_type'],
                 format_hint=str(source_config.get('response_format_hint') or 'auto'),
             )
+            try:
+                parsed = self.transforms.apply(parsed, transform_rules)
+            except TransformError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
             run.parser_used = parsed.parser_used
             run.warning_count = len(parsed.warnings or [])
 

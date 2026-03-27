@@ -82,6 +82,10 @@ type RecipeForm = {
   http_timeout_seconds: string;
   http_response_format_hint: ResponseFormatHint;
   http_body: string;
+  rename_fields_text: string;
+  drop_fields_text: string;
+  keep_fields_text: string;
+  add_static_fields_text: string;
   target_mode: TargetMode;
   target_dataset_id: string;
   dataset_name_template: string;
@@ -98,6 +102,10 @@ const EMPTY_FORM: RecipeForm = {
   http_timeout_seconds: '15',
   http_response_format_hint: 'auto',
   http_body: '',
+  rename_fields_text: '',
+  drop_fields_text: '',
+  keep_fields_text: '',
+  add_static_fields_text: '',
   target_mode: 'create_new_dataset',
   target_dataset_id: '',
   dataset_name_template: '',
@@ -115,6 +123,10 @@ function recipeToForm(recipe: ImportRecipe): RecipeForm {
     http_timeout_seconds: String(recipe.source_config?.timeout_seconds ?? 15),
     http_response_format_hint: recipe.source_config?.response_format_hint ?? 'auto',
     http_body: recipe.source_config?.body ?? '',
+    rename_fields_text: Object.entries((recipe.transform_rules?.rename_fields as Record<string, string> | undefined) ?? {}).map(([from, to]) => `${from}=${to}`).join('\n'),
+    drop_fields_text: ((recipe.transform_rules?.drop_fields as string[] | undefined) ?? []).join(', '),
+    keep_fields_text: ((recipe.transform_rules?.keep_fields as string[] | undefined) ?? []).join(', '),
+    add_static_fields_text: Object.entries((recipe.transform_rules?.add_static_fields as Record<string, string> | undefined) ?? {}).map(([key, value]) => `${key}=${value}`).join('\n'),
     target_mode: recipe.target_mode,
     target_dataset_id: recipe.target_dataset_id ?? '',
     dataset_name_template: recipe.dataset_name_template ?? '',
@@ -168,6 +180,34 @@ function buildSourceConfig(form: RecipeForm): Record<string, unknown> {
     timeout_seconds: Number(form.http_timeout_seconds || '15'),
     response_format_hint: form.http_response_format_hint,
     body: form.http_body.trim() || null,
+  };
+}
+
+function parseKeyValueLines(text: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const rawLine of text.split('\n')) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const eq = line.indexOf('=');
+    if (eq === -1) throw new Error(`Expected key=value line, got: ${line}`);
+    const key = line.slice(0, eq).trim();
+    const value = line.slice(eq + 1).trim();
+    if (!key) throw new Error(`Expected key=value line, got: ${line}`);
+    result[key] = value;
+  }
+  return result;
+}
+
+function parseCsvList(text: string): string[] {
+  return text.split(',').map((part) => part.trim()).filter(Boolean);
+}
+
+function buildTransformRules(form: RecipeForm): Record<string, unknown> {
+  return {
+    rename_fields: parseKeyValueLines(form.rename_fields_text),
+    drop_fields: parseCsvList(form.drop_fields_text),
+    keep_fields: parseCsvList(form.keep_fields_text),
+    add_static_fields: parseKeyValueLines(form.add_static_fields_text),
   };
 }
 
@@ -258,7 +298,7 @@ export function ImportsPage() {
         target_dataset_id: form.target_mode === 'append_to_dataset' ? (form.target_dataset_id || null) : null,
         dataset_name_template: form.target_mode === 'create_new_dataset' ? (form.dataset_name_template || null) : null,
         parser_options: {},
-        transform_rules: {},
+        transform_rules: buildTransformRules(form),
         preview_config: {},
       };
 
@@ -306,7 +346,7 @@ export function ImportsPage() {
           source_type: form.source_type,
           source_config: buildSourceConfig(form),
           parser_options: {},
-          transform_rules: {},
+          transform_rules: buildTransformRules(form),
           preview_config: {},
         }),
       });
@@ -436,6 +476,15 @@ export function ImportsPage() {
                 <textarea value={form.http_body} onChange={(event) => setForm((current) => ({ ...current, http_body: event.target.value }))} rows={4} placeholder="Optional raw request body for POST recipes" />
               </>
             ) : null}
+
+            <div className="card stack">
+              <h3>Transform rules</h3>
+              <textarea value={form.rename_fields_text} onChange={(event) => setForm((current) => ({ ...current, rename_fields_text: event.target.value }))} rows={4} placeholder={"rename fields, one per line\nticketId=ticket_id\nsev=severity"} />
+              <input value={form.drop_fields_text} onChange={(event) => setForm((current) => ({ ...current, drop_fields_text: event.target.value }))} placeholder="drop fields (comma-separated)" />
+              <input value={form.keep_fields_text} onChange={(event) => setForm((current) => ({ ...current, keep_fields_text: event.target.value }))} placeholder="keep fields (comma-separated)" />
+              <textarea value={form.add_static_fields_text} onChange={(event) => setForm((current) => ({ ...current, add_static_fields_text: event.target.value }))} rows={4} placeholder={"static fields, one per line\nsource=jira\nteam=platform"} />
+              <div className="muted">Applied in order: rename → drop → keep → add static. Current MVP only transforms record-set payloads.</div>
+            </div>
 
             <select value={form.target_mode} onChange={(event) => setForm((current) => ({ ...current, target_mode: event.target.value as TargetMode }))}>
               <option value="create_new_dataset">Create new dataset each run</option>
