@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.imports.recipes_service import ImportRecipeService
-from app.imports.schemas import ImportRecipeCreate, ImportRecipeRead, ImportRecipeRunResponse, ImportRecipeUpdate, ImportRunRead, ImportRunsResponse
+from app.imports.schemas import ImportRecipeCreate, ImportRecipePreviewRequest, ImportRecipePreviewResponse, ImportRecipeRead, ImportRecipeRunResponse, ImportRecipeUpdate, ImportRunRead, ImportRunsResponse
 
 router = APIRouter()
 
@@ -33,8 +33,13 @@ def delete_import_recipe(recipe_id: str, db: Session = Depends(get_db)):
     return ImportRecipeService(db).delete_recipe(recipe_id)
 
 
+@router.post('/import-recipes/preview', response_model=ImportRecipePreviewResponse)
+async def preview_import_recipe(payload: ImportRecipePreviewRequest, db: Session = Depends(get_db)):
+    return await ImportRecipeService(db).preview_recipe(payload)
+
+
 @router.post('/import-recipes/{recipe_id}/run', response_model=ImportRecipeRunResponse)
-async def run_import_recipe(recipe_id: str, file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def run_import_recipe(recipe_id: str, file: UploadFile | None = File(default=None), db: Session = Depends(get_db)):
     return await ImportRecipeService(db).run_recipe(recipe_id, file)
 
 

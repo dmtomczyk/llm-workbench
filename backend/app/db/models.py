@@ -155,6 +155,7 @@ class ImportRecipe(Base, TimestampTextMixin):
     description: Mapped[str | None] = mapped_column(Text)
     enabled: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
     source_type: Mapped[str] = mapped_column(Text, nullable=False)
+    source_config_json: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'{}'"))
     target_mode: Mapped[str] = mapped_column(Text, nullable=False)
     target_dataset_id: Mapped[str | None] = mapped_column(Text)
     dataset_name_template: Mapped[str | None] = mapped_column(Text)

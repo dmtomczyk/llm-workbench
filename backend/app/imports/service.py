@@ -70,9 +70,8 @@ class ImportService:
             raise HTTPException(status_code=400, detail=f'extension .{extension} is not allowed')
 
         raw_bytes = await upload.read()
-        checksum = hashlib.sha256(raw_bytes).hexdigest()
-        storage_path = self.settings.resolve_path(self.settings.storage.imports_dir) / f'{prefix}_{safe_name}'
-        storage_path.write_bytes(raw_bytes)
+        checksum = self.compute_checksum(raw_bytes)
+        storage_path = self.write_raw_artifact(prefix, safe_name, raw_bytes)
         media_type = upload.content_type or mimetypes.guess_type(safe_name)[0] or 'application/octet-stream'
         return {
             'storage_id': prefix,
@@ -82,6 +81,14 @@ class ImportService:
             'byte_size': len(raw_bytes),
             'checksum': checksum,
         }
+
+    def compute_checksum(self, raw_bytes: bytes) -> str:
+        return hashlib.sha256(raw_bytes).hexdigest()
+
+    def write_raw_artifact(self, prefix: str, safe_name: str, raw_bytes: bytes) -> Path:
+        storage_path = self.settings.resolve_path(self.settings.storage.imports_dir) / f'{prefix}_{safe_name}'
+        storage_path.write_bytes(raw_bytes)
+        return storage_path
 
     def parse_stored_file(self, storage_path: Path, media_type: str | None = None) -> ParsedContent:
         return self.parser.parse(storage_path, media_type=media_type)

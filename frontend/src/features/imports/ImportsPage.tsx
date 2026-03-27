@@ -8,13 +8,25 @@ type Dataset = {
   latest_version_no?: number;
 };
 
+type SourceType = 'file_upload' | 'http';
+type TargetMode = 'create_new_dataset' | 'append_to_dataset';
+type ResponseFormatHint = 'auto' | 'json' | 'csv' | 'text';
+
 type ImportRecipe = {
   id: string;
   name: string;
   description?: string | null;
   enabled: boolean;
-  source_type: 'file_upload';
-  target_mode: 'create_new_dataset' | 'append_to_dataset';
+  source_type: SourceType;
+  source_config?: {
+    method?: 'GET' | 'POST';
+    url?: string;
+    headers?: Record<string, string>;
+    timeout_seconds?: number;
+    response_format_hint?: ResponseFormatHint;
+    body?: string | null;
+  };
+  target_mode: TargetMode;
   target_dataset_id?: string | null;
   target_dataset_name?: string | null;
   dataset_name_template?: string | null;
@@ -33,7 +45,7 @@ type ImportRun = {
   dataset_id?: string | null;
   dataset_version_id?: string | null;
   status: 'created' | 'running' | 'success' | 'failed';
-  source_type: 'file_upload';
+  source_type: SourceType;
   original_filename?: string | null;
   storage_path?: string | null;
   parser_used?: string | null;
@@ -48,11 +60,29 @@ type ImportRun = {
   created_at: string;
 };
 
+type PreviewResponse = {
+  ok: boolean;
+  source_type: SourceType;
+  parser_used: string;
+  media_type?: string | null;
+  row_count?: number | null;
+  preview: Record<string, unknown>;
+  warnings: string[];
+  diagnostics: Record<string, unknown>;
+};
+
 type RecipeForm = {
   name: string;
   description: string;
   enabled: boolean;
-  target_mode: 'create_new_dataset' | 'append_to_dataset';
+  source_type: SourceType;
+  http_method: 'GET' | 'POST';
+  http_url: string;
+  http_headers_text: string;
+  http_timeout_seconds: string;
+  http_response_format_hint: ResponseFormatHint;
+  http_body: string;
+  target_mode: TargetMode;
   target_dataset_id: string;
   dataset_name_template: string;
 };
@@ -61,6 +91,13 @@ const EMPTY_FORM: RecipeForm = {
   name: '',
   description: '',
   enabled: true,
+  source_type: 'file_upload',
+  http_method: 'GET',
+  http_url: '',
+  http_headers_text: '{}',
+  http_timeout_seconds: '15',
+  http_response_format_hint: 'auto',
+  http_body: '',
   target_mode: 'create_new_dataset',
   target_dataset_id: '',
   dataset_name_template: '',
@@ -71,6 +108,13 @@ function recipeToForm(recipe: ImportRecipe): RecipeForm {
     name: recipe.name,
     description: recipe.description ?? '',
     enabled: recipe.enabled,
+    source_type: recipe.source_type,
+    http_method: recipe.source_config?.method ?? 'GET',
+    http_url: recipe.source_config?.url ?? '',
+    http_headers_text: JSON.stringify(recipe.source_config?.headers ?? {}, null, 2),
+    http_timeout_seconds: String(recipe.source_config?.timeout_seconds ?? 15),
+    http_response_format_hint: recipe.source_config?.response_format_hint ?? 'auto',
+    http_body: recipe.source_config?.body ?? '',
     target_mode: recipe.target_mode,
     target_dataset_id: recipe.target_dataset_id ?? '',
     dataset_name_template: recipe.dataset_name_template ?? '',
@@ -91,6 +135,42 @@ function summarizeRun(run: ImportRun): string {
   return run.parser_used ?? 'parser pending';
 }
 
+function summarizeResponseError(body: unknown, fallback = 'Request failed'): string {
+  if (!body || typeof body !== 'object') {
+    return typeof body === 'string' && body ? body : fallback;
+  }
+  const record = body as Record<string, unknown>;
+  const detail = record.detail;
+  if (typeof detail === 'string') return detail;
+  if (detail && typeof detail === 'object') {
+    const detailRecord = detail as Record<string, unknown>;
+    const parts: string[] = [];
+    if (typeof detailRecord.message === 'string') parts.push(detailRecord.message);
+    if (typeof detailRecord.type === 'string') parts.push(`type=${detailRecord.type}`);
+    const diagnostics = detailRecord.diagnostics;
+    if (diagnostics && typeof diagnostics === 'object') {
+      const diag = diagnostics as Record<string, unknown>;
+      if (typeof diag.status_code === 'number') parts.push(`status=${diag.status_code}`);
+      if (typeof diag.url === 'string') parts.push(`url=${diag.url}`);
+    }
+    if (parts.length > 0) return parts.join(' · ');
+  }
+  if (typeof record.message === 'string') return record.message;
+  return fallback;
+}
+
+function buildSourceConfig(form: RecipeForm): Record<string, unknown> {
+  if (form.source_type === 'file_upload') return {};
+  return {
+    method: form.http_method,
+    url: form.http_url.trim(),
+    headers: form.http_headers_text.trim() ? JSON.parse(form.http_headers_text) : {},
+    timeout_seconds: Number(form.http_timeout_seconds || '15'),
+    response_format_hint: form.http_response_format_hint,
+    body: form.http_body.trim() || null,
+  };
+}
+
 export function ImportsPage() {
   const [recipes, setRecipes] = useState<ImportRecipe[]>([]);
   const [datasets, setDatasets] = useState<Dataset[]>([]);
@@ -99,6 +179,8 @@ export function ImportsPage() {
   const [runs, setRuns] = useState<ImportRun[]>([]);
   const [selectedRunId, setSelectedRunId] = useState('');
   const [runDetail, setRunDetail] = useState<ImportRun | null>(null);
+  const [preview, setPreview] = useState<PreviewResponse | null>(null);
+  const [previewing, setPreviewing] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [running, setRunning] = useState(false);
@@ -147,9 +229,11 @@ export function ImportsPage() {
       setRuns([]);
       setSelectedRunId('');
       setRunDetail(null);
+      setPreview(null);
       return;
     }
     setForm(recipeToForm(selectedRecipe));
+    setPreview(null);
     void loadRuns(selectedRecipe.id);
   }, [selectedRecipe]);
 
@@ -163,20 +247,21 @@ export function ImportsPage() {
     setError('');
     setMessage('');
 
-    const payload = {
-      name: form.name,
-      description: form.description || null,
-      enabled: form.enabled,
-      source_type: 'file_upload' as const,
-      target_mode: form.target_mode,
-      target_dataset_id: form.target_mode === 'append_to_dataset' ? (form.target_dataset_id || null) : null,
-      dataset_name_template: form.target_mode === 'create_new_dataset' ? (form.dataset_name_template || null) : null,
-      parser_options: {},
-      transform_rules: {},
-      preview_config: {},
-    };
-
     try {
+      const payload = {
+        name: form.name,
+        description: form.description || null,
+        enabled: form.enabled,
+        source_type: form.source_type,
+        source_config: buildSourceConfig(form),
+        target_mode: form.target_mode,
+        target_dataset_id: form.target_mode === 'append_to_dataset' ? (form.target_dataset_id || null) : null,
+        dataset_name_template: form.target_mode === 'create_new_dataset' ? (form.dataset_name_template || null) : null,
+        parser_options: {},
+        transform_rules: {},
+        preview_config: {},
+      };
+
       if (selectedRecipeId) {
         const updated = await api<ImportRecipe>(`/api/import-recipes/${selectedRecipeId}`, { method: 'PATCH', body: JSON.stringify(payload) });
         setSelectedRecipeId(updated.id);
@@ -203,9 +288,35 @@ export function ImportsPage() {
       setForm(EMPTY_FORM);
       setRuns([]);
       setRunDetail(null);
+      setPreview(null);
       await loadAll();
     } catch (err) {
       setError(String(err));
+    }
+  }
+
+  async function onPreview() {
+    setPreviewing(true);
+    setError('');
+    setMessage('');
+    try {
+      const response = await api<PreviewResponse>('/api/import-recipes/preview', {
+        method: 'POST',
+        body: JSON.stringify({
+          source_type: form.source_type,
+          source_config: buildSourceConfig(form),
+          parser_options: {},
+          transform_rules: {},
+          preview_config: {},
+        }),
+      });
+      setPreview(response);
+      setMessage('Preview loaded');
+    } catch (err) {
+      setPreview(null);
+      setError(String(err));
+    } finally {
+      setPreviewing(false);
     }
   }
 
@@ -213,28 +324,40 @@ export function ImportsPage() {
     event.preventDefault();
     if (!selectedRecipeId) return;
     const formEl = event.currentTarget;
-    const formData = new FormData(formEl);
-    const file = formData.get('file');
-    if (!(file instanceof File)) return;
 
     setRunning(true);
     setError('');
     setMessage('');
     try {
-      const payload = new FormData();
-      payload.append('file', file);
-      const response = await fetch(`/api/import-recipes/${selectedRecipeId}/run`, { method: 'POST', body: payload });
-      const raw = await response.text();
-      const body = raw ? JSON.parse(raw) : {};
-      if (!response.ok) {
-        throw new Error(typeof body?.detail === 'string' ? body.detail : raw || 'Run failed');
+      let response: Response;
+      if (selectedRecipe?.source_type === 'http') {
+        response = await fetch(`/api/import-recipes/${selectedRecipeId}/run`, { method: 'POST', body: new FormData() });
+      } else {
+        const formData = new FormData(formEl);
+        const file = formData.get('file');
+        if (!(file instanceof File)) throw new Error('Please select a file before running this recipe');
+        const payload = new FormData();
+        payload.append('file', file);
+        response = await fetch(`/api/import-recipes/${selectedRecipeId}/run`, { method: 'POST', body: payload });
       }
-      setMessage(body.message || 'Import recipe ran successfully');
+
+      const raw = await response.text();
+      let body: unknown = {};
+      try {
+        body = raw ? JSON.parse(raw) : {};
+      } catch {
+        body = raw;
+      }
+      if (!response.ok) {
+        throw new Error(summarizeResponseError(body, raw || 'Run failed'));
+      }
+      const bodyRecord = body && typeof body === 'object' ? body as Record<string, unknown> : {};
+      setMessage(typeof bodyRecord.message === 'string' ? bodyRecord.message : 'Import recipe ran successfully');
       formEl.reset();
       await loadAll();
       await loadRuns(selectedRecipeId);
-      if (typeof body?.run_id === 'string') {
-        setSelectedRunId(body.run_id);
+      if (typeof bodyRecord.run_id === 'string') {
+        setSelectedRunId(bodyRecord.run_id);
       }
     } catch (err) {
       setError(String(err));
@@ -247,6 +370,7 @@ export function ImportsPage() {
     setSelectedRecipeId('');
     setSelectedRunId('');
     setRunDetail(null);
+    setPreview(null);
     setForm(EMPTY_FORM);
     setMessage('');
     setError('');
@@ -267,6 +391,7 @@ export function ImportsPage() {
               <li key={recipe.id}>
                 <button type="button" className={selectedRecipeId === recipe.id ? 'session-button active' : 'session-button'} onClick={() => setSelectedRecipeId(recipe.id)}>
                   <strong>{recipe.name}</strong>
+                  <div className="muted">{recipe.source_type === 'http' ? `HTTP · ${recipe.source_config?.method ?? 'GET'} ${recipe.source_config?.url ?? ''}` : 'File upload'}</div>
                   <div className="muted">{recipe.target_mode === 'append_to_dataset' ? `Append to ${recipe.target_dataset_name ?? recipe.target_dataset_id}` : 'Create new dataset each run'}</div>
                   <div className="muted">{recipe.last_run_status ?? 'Never run'}{recipe.last_run_at ? ` · ${recipe.last_run_at}` : ''}</div>
                 </button>
@@ -286,7 +411,33 @@ export function ImportsPage() {
               <input type="checkbox" checked={form.enabled} onChange={(event) => setForm((current) => ({ ...current, enabled: event.target.checked }))} />
               <span>Enabled</span>
             </label>
-            <select value={form.target_mode} onChange={(event) => setForm((current) => ({ ...current, target_mode: event.target.value as RecipeForm['target_mode'] }))}>
+            <select value={form.source_type} onChange={(event) => setForm((current) => ({ ...current, source_type: event.target.value as SourceType }))}>
+              <option value="file_upload">File upload</option>
+              <option value="http">HTTP / internal URL</option>
+            </select>
+
+            {form.source_type === 'http' ? (
+              <>
+                <select value={form.http_method} onChange={(event) => setForm((current) => ({ ...current, http_method: event.target.value as 'GET' | 'POST' }))}>
+                  <option value="GET">GET</option>
+                  <option value="POST">POST</option>
+                </select>
+                <input value={form.http_url} onChange={(event) => setForm((current) => ({ ...current, http_url: event.target.value }))} placeholder="http://internal.service.local/export.json" required />
+                <textarea value={form.http_headers_text} onChange={(event) => setForm((current) => ({ ...current, http_headers_text: event.target.value }))} rows={5} placeholder='{"X-Api-Key":"..."}' />
+                <div className="grid two-col">
+                  <input value={form.http_timeout_seconds} onChange={(event) => setForm((current) => ({ ...current, http_timeout_seconds: event.target.value }))} placeholder="Timeout seconds" inputMode="numeric" />
+                  <select value={form.http_response_format_hint} onChange={(event) => setForm((current) => ({ ...current, http_response_format_hint: event.target.value as ResponseFormatHint }))}>
+                    <option value="auto">Auto-detect</option>
+                    <option value="json">JSON</option>
+                    <option value="csv">CSV</option>
+                    <option value="text">Text</option>
+                  </select>
+                </div>
+                <textarea value={form.http_body} onChange={(event) => setForm((current) => ({ ...current, http_body: event.target.value }))} rows={4} placeholder="Optional raw request body for POST recipes" />
+              </>
+            ) : null}
+
+            <select value={form.target_mode} onChange={(event) => setForm((current) => ({ ...current, target_mode: event.target.value as TargetMode }))}>
               <option value="create_new_dataset">Create new dataset each run</option>
               <option value="append_to_dataset">Append to existing dataset</option>
             </select>
@@ -298,21 +449,44 @@ export function ImportsPage() {
                 {datasets.map((dataset) => <option key={dataset.id} value={dataset.id}>{dataset.name}</option>)}
               </select>
             )}
-            <div className="muted">MVP scope: file-backed recipes only. Parser selection is inferred from file extension.</div>
+            <div className="muted">Current MVP supports file uploads plus internal HTTP/HTTPS endpoints with JSON, CSV, or text responses.</div>
             <div className="row between wrap">
-              {selectedRecipeId ? <button type="button" className="danger-button" onClick={() => void onDelete()}>Delete</button> : <span />}
+              <div className="row wrap">
+                <button type="button" onClick={() => void onPreview()} disabled={previewing}>{previewing ? 'Testing…' : 'Test recipe'}</button>
+                {selectedRecipeId ? <button type="button" className="danger-button" onClick={() => void onDelete()}>Delete</button> : null}
+              </div>
               <button type="submit">{selectedRecipeId ? 'Save recipe' : 'Create recipe'}</button>
             </div>
           </form>
         </div>
+
+        {preview ? (
+          <div className="card stack">
+            <div className="row between wrap">
+              <h2>Preview</h2>
+              <span className="muted">{preview.parser_used} · {preview.media_type ?? 'unknown media type'}</span>
+            </div>
+            <div className="muted">Rows: {preview.row_count ?? 'unknown'}</div>
+            {preview.warnings.length > 0 ? <div className="notice error"><pre>{preview.warnings.join('\n')}</pre></div> : null}
+            <details open>
+              <summary>Diagnostics</summary>
+              <pre>{prettyJson(preview.diagnostics)}</pre>
+            </details>
+            <details open>
+              <summary>Preview payload</summary>
+              <pre>{prettyJson(preview.preview)}</pre>
+            </details>
+          </div>
+        ) : null}
 
         <div className="card">
           <h2>Run recipe</h2>
           {!selectedRecipe ? <p className="muted">Create or select a recipe first.</p> : (
             <form className="stack" onSubmit={onRun}>
               <div className="muted">Recipe: <strong>{selectedRecipe.name}</strong></div>
+              <div className="muted">Source: {selectedRecipe.source_type === 'http' ? `${selectedRecipe.source_config?.method ?? 'GET'} ${selectedRecipe.source_config?.url ?? ''}` : 'File upload'}</div>
               <div className="muted">Mode: {selectedRecipe.target_mode === 'append_to_dataset' ? `append to ${selectedRecipe.target_dataset_name ?? selectedRecipe.target_dataset_id}` : `create new dataset (${selectedRecipe.dataset_name_template ?? selectedRecipe.name})`}</div>
-              <input name="file" type="file" required />
+              {selectedRecipe.source_type === 'file_upload' ? <input name="file" type="file" required /> : null}
               <button type="submit" disabled={running}>{running ? 'Running…' : 'Run recipe'}</button>
             </form>
           )}
@@ -338,7 +512,8 @@ export function ImportsPage() {
                   <div className="stack">
                     <div><strong>Run:</strong> {runDetail.id}</div>
                     <div><strong>Status:</strong> {runDetail.status}</div>
-                    <div><strong>File:</strong> {runDetail.original_filename ?? '—'}</div>
+                    <div><strong>Source type:</strong> {runDetail.source_type}</div>
+                    <div><strong>Source name:</strong> {runDetail.original_filename ?? '—'}</div>
                     <div><strong>Parser:</strong> {runDetail.parser_used ?? '—'}</div>
                     <div><strong>Media type:</strong> {runDetail.media_type ?? '—'}</div>
                     <div><strong>Warnings:</strong> {runDetail.warning_count}</div>
