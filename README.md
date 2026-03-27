@@ -42,12 +42,31 @@ Local UI screenshots live in:
 
 - `docs/screenshots/`
 
-Suggested shots include:
+The repo now includes a lightweight screenshot generator for docs/README refreshes.
+It uses Playwright against the built frontend with mocked API responses, so it does **not** need a live backend or real provider keys.
+
+Generate/update screenshots with:
+
+```bash
+cd frontend
+npm install
+npx playwright install chromium
+npm run build
+npm run screenshots
+```
+
+Current generated shots:
+- dashboard
 - chat
 - providers
 - workbench
 - workflows
 - automations
+
+Recommended maintainer workflow:
+- refresh screenshots before releases or notable UI changes
+- keep the set small and representative
+- treat them as docs assets, not pixel-perfect regression tests
 
 ## Intended deployment model
 
