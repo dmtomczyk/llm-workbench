@@ -187,6 +187,38 @@ function renderRecordTable(items: Record<string, unknown>[]) {
   );
 }
 
+function buildWorkbenchUrl(params: { datasetId?: string | null; providerId?: string | null; templateId?: string | null; model?: string | null }) {
+  const search = new URLSearchParams();
+  if (params.datasetId) search.set('dataset_id', params.datasetId);
+  if (params.providerId) search.set('provider_id', params.providerId);
+  if (params.templateId) search.set('template_id', params.templateId);
+  if (params.model) search.set('model', params.model);
+  const qs = search.toString();
+  return `/workbench${qs ? `?${qs}` : ''}`;
+}
+
+function buildWorkflowsUrl(params: { workflowId?: string | null; datasetId?: string | null; providerId?: string | null; templateId?: string | null; model?: string | null }) {
+  const search = new URLSearchParams();
+  if (params.workflowId) search.set('workflow_id', params.workflowId);
+  if (params.datasetId) search.set('dataset_id', params.datasetId);
+  if (params.providerId) search.set('provider_id', params.providerId);
+  if (params.templateId) search.set('template_id', params.templateId);
+  if (params.model) search.set('model', params.model);
+  const qs = search.toString();
+  return `/workflows${qs ? `?${qs}` : ''}`;
+}
+
+function buildAutomationsUrl(params: { targetType: 'workflow' | 'template_prompt'; workflowId?: string | null; datasetId?: string | null; providerId?: string | null; templateId?: string | null; model?: string | null }) {
+  const search = new URLSearchParams();
+  search.set('target_type', params.targetType);
+  if (params.workflowId) search.set('workflow_id', params.workflowId);
+  if (params.datasetId) search.set('dataset_id', params.datasetId);
+  if (params.providerId) search.set('provider_id', params.providerId);
+  if (params.templateId) search.set('template_id', params.templateId);
+  if (params.model) search.set('model', params.model);
+  return `/automations?${search.toString()}`;
+}
+
 function summarizeRun(run: ImportRun): string {
   if (run.status === 'success' && run.dataset_version_id) return `Created ${run.dataset_version_id}`;
   if (run.status === 'failed') return 'Run failed';
@@ -649,6 +681,13 @@ export function ImportsPage() {
                     <div><strong>Warnings:</strong> {runDetail.warning_count}</div>
                     {runDetail.dataset_id ? <div><strong>Dataset:</strong> {datasetNameById[runDetail.dataset_id] ?? runDetail.dataset_id} <span className="muted">({runDetail.dataset_id})</span></div> : null}
                     {runDetail.dataset_version_id ? <div><strong>Dataset version:</strong> {runDetail.dataset_version_id}</div> : null}
+                    {runDetail.dataset_id ? (
+                      <div className="row wrap">
+                        <a className="button-link" href={buildWorkbenchUrl({ datasetId: runDetail.dataset_id })}>Open in Workbench</a>
+                        <a className="button-link" href={buildWorkflowsUrl({ datasetId: runDetail.dataset_id })}>Use in Workflows</a>
+                        <a className="button-link" href={buildAutomationsUrl({ targetType: 'template_prompt', datasetId: runDetail.dataset_id })}>Seed Automation</a>
+                      </div>
+                    ) : null}
                     {runDetail.error_text ? <div className="notice error"><pre>{runDetail.error_text}</pre></div> : null}
                     {isRecordArray(runDetail.details.preview && (runDetail.details.preview as Record<string, unknown>).sample_items) ? (
                       <div className="stack">

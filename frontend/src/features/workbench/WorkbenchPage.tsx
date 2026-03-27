@@ -123,7 +123,17 @@ export function WorkbenchPage() {
     setDatasets(datasetData);
     setProviders(providerData);
     setTemplates(templateData);
-    setSelectedTemplateId((current) => current || templateData[0]?.id || '');
+
+    const search = new URLSearchParams(window.location.search);
+    const datasetParam = search.get('dataset_id') || '';
+    const providerParam = search.get('provider_id') || '';
+    const templateParam = search.get('template_id') || '';
+    const modelParam = search.get('model') || '';
+
+    setSelectedDatasetId((current) => current || datasetParam || datasetData[0]?.id || '');
+    setSelectedProviderId((current) => current || providerParam || '');
+    setSelectedTemplateId((current) => current || templateParam || templateData[0]?.id || '');
+    setModelOverride((current) => current || modelParam || '');
   }
 
   useEffect(() => {
@@ -304,6 +314,10 @@ export function WorkbenchPage() {
 
         <div className="card">
           <h2>Current run setup</h2>
+          <div className="row wrap">
+            {selectedDatasetId ? <a className="button-link" href={`/workflows?dataset_id=${encodeURIComponent(selectedDatasetId)}&provider_id=${encodeURIComponent(selectedProviderId)}&template_id=${encodeURIComponent(selectedTemplateId)}`}>Open in Workflows</a> : null}
+            {selectedDatasetId ? <a className="button-link" href={`/automations?target_type=template_prompt&dataset_id=${encodeURIComponent(selectedDatasetId)}&provider_id=${encodeURIComponent(selectedProviderId)}&template_id=${encodeURIComponent(selectedTemplateId)}`}>Seed Automation</a> : null}
+          </div>
           <ul className="list">
             <li>
               <strong>Dataset:</strong> {selectedDataset ? selectedDataset.name : 'None selected'}

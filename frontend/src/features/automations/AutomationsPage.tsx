@@ -174,7 +174,25 @@ export function AutomationsPage() {
     setProviders(providerData);
     setTemplates(templateData);
     setDatasets(datasetData);
+
+    const search = new URLSearchParams(window.location.search);
+    const targetType = search.get('target_type') as FormState['target_type'] | null;
+    const workflowId = search.get('workflow_id') || '';
+    const providerId = search.get('provider_id') || '';
+    const templateId = search.get('template_id') || '';
+    const datasetId = search.get('dataset_id') || '';
+    const model = search.get('model') || '';
+
     setSelectedId((current) => current || automationData[0]?.id || '');
+    setForm((current) => ({
+      ...current,
+      target_type: targetType || current.target_type,
+      workflow_id: workflowId || current.workflow_id,
+      provider_id: providerId || current.provider_id,
+      template_id: templateId || current.template_id,
+      dataset_id: datasetId || current.dataset_id,
+      model: model || current.model,
+    }));
   }
 
   async function loadRuns(automationId: string) {
@@ -299,6 +317,10 @@ export function AutomationsPage() {
       <div className="stack">
         <div className="card">
           <h2>{selected ? 'Edit automation' : 'Create automation'}</h2>
+          <div className="row wrap">
+            {form.workflow_id ? <a className="button-link" href={`/workflows?workflow_id=${encodeURIComponent(form.workflow_id)}`}>Open workflow</a> : null}
+            {form.dataset_id ? <a className="button-link" href={`/workbench?dataset_id=${encodeURIComponent(form.dataset_id)}&provider_id=${encodeURIComponent(form.provider_id)}&template_id=${encodeURIComponent(form.template_id)}&model=${encodeURIComponent(form.model)}`}>Open in Workbench</a> : null}
+          </div>
           <form className="stack" onSubmit={selected ? (event) => { event.preventDefault(); void onSave(); } : onCreate}>
             <input value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} placeholder="Nightly summary" required />
             <label className="checkbox-row">

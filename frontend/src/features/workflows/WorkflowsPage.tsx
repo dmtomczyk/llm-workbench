@@ -224,7 +224,19 @@ export function WorkflowsPage() {
     setDatasets(datasetData);
     setProviders(providerData);
     setTemplates(templateData);
-    setSelectedWorkflowId((current) => current || workflowData[0]?.id || '');
+
+    const search = new URLSearchParams(window.location.search);
+    const workflowParam = search.get('workflow_id') || '';
+    const datasetParam = search.get('dataset_id') || '';
+    const providerParam = search.get('provider_id') || '';
+    const templateParam = search.get('template_id') || '';
+    const modelParam = search.get('model') || '';
+
+    setSelectedWorkflowId((current) => current || workflowParam || workflowData[0]?.id || '');
+    setRunDatasetId((current) => current || datasetParam || '');
+    setRunProviderId((current) => current || providerParam || '');
+    setRunTemplateId((current) => current || templateParam || '');
+    setRunModel((current) => current || modelParam || '');
   }
 
   useEffect(() => {
@@ -468,6 +480,10 @@ export function WorkflowsPage() {
         <div className="card">
           <h2>Run workflow</h2>
           <p className="muted">V1 supports `prompt_template` and `llm_provider` steps. You can hardcode IDs inside the definition or supply overrides here.</p>
+          <div className="row wrap">
+            {selectedWorkflowId ? <a className="button-link" href={`/automations?target_type=workflow&workflow_id=${encodeURIComponent(selectedWorkflowId)}`}>Turn into automation</a> : null}
+            {runDatasetId ? <a className="button-link" href={`/workbench?dataset_id=${encodeURIComponent(runDatasetId)}&provider_id=${encodeURIComponent(runProviderId)}&template_id=${encodeURIComponent(runTemplateId)}&model=${encodeURIComponent(runModel)}`}>Open in Workbench</a> : null}
+          </div>
           <div className="stack">
             <select value={runDatasetId} onChange={(event) => setRunDatasetId(event.target.value)}>
               <option value="">No dataset override</option>

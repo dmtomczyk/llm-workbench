@@ -234,6 +234,21 @@ pre {
   margin: 0;
 }
 
+.button-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.55rem 0.8rem;
+  border-radius: 0.7rem;
+  border: 1px solid #30363d;
+  background: #11161d;
+  color: #e6edf3;
+  text-decoration: none;
+}
+.button-link:hover {
+  background: #161b22;
+}
+
 @media (max-width: 900px) {
   .chat-layout { grid-template-columns: 1fr; }
   .shell { grid-template-columns: 1fr; }
