@@ -280,6 +280,7 @@ class ChatService:
                                     'stream_interrupted': True,
                                     'regenerated': payload.regenerate,
                                     'grounding_dataset_ids': context_info.get('grounding_dataset_ids') or [],
+                                    'grounding_dataset_names': context_info.get('grounding_dataset_names') or [],
                                     'grounded': context_info.get('grounded') or False,
                                 },
                             ),
@@ -327,6 +328,7 @@ class ChatService:
                 'provider_result_status': provider_result.get('status'),
                 'regenerated': payload.regenerate,
                 'grounding_dataset_ids': context_info.get('grounding_dataset_ids') or [],
+                'grounding_dataset_names': context_info.get('grounding_dataset_names') or [],
                 'grounded': context_info.get('grounded') or False,
             }
             if cumulative and finalized is None:
@@ -590,7 +592,7 @@ class ChatService:
     def _grounding_system_message(self, session_metadata: dict) -> tuple[str | None, dict[str, object]]:
         grounding = session_metadata.get('grounding') if isinstance(session_metadata, dict) else None
         if not isinstance(grounding, dict):
-            return None, {'grounded': False, 'grounding_dataset_ids': []}
+            return None, {'grounded': False, 'grounding_dataset_ids': [], 'grounding_dataset_names': []}
 
         dataset_ids: list[str] = []
         if isinstance(grounding.get('dataset_ids'), list):
@@ -599,10 +601,11 @@ class ChatService:
             dataset_ids = [grounding.get('dataset_id')]
 
         if not dataset_ids:
-            return None, {'grounded': False, 'grounding_dataset_ids': []}
+            return None, {'grounded': False, 'grounding_dataset_ids': [], 'grounding_dataset_names': []}
 
         chunks: list[str] = []
         resolved_ids: list[str] = []
+        resolved_names: list[str] = []
         for dataset_id in dataset_ids:
             dataset = self.db.get(Dataset, dataset_id)
             if dataset is None:
@@ -626,16 +629,17 @@ class ChatService:
                 f'Dataset Preview: {preview_text}'
             )
             resolved_ids.append(dataset.id)
+            resolved_names.append(dataset.name)
 
         if not chunks:
-            return None, {'grounded': False, 'grounding_dataset_ids': dataset_ids}
+            return None, {'grounded': False, 'grounding_dataset_ids': dataset_ids, 'grounding_dataset_names': []}
 
         grounding_message = (
             'Use the linked dataset context below as a primary grounding source for this chat. '
             'Prefer answers supported by these linked datasets. If the answer is not present in the linked datasets, say that clearly.\n\n'
             + '\n\n---\n\n'.join(chunks)
         )
-        return grounding_message, {'grounded': True, 'grounding_dataset_ids': resolved_ids}
+        return grounding_message, {'grounded': True, 'grounding_dataset_ids': resolved_ids, 'grounding_dataset_names': resolved_names}
 
     def _provider_row(self, provider_id: str) -> LLMProvider:
         row = self.db.get(LLMProvider, provider_id)
