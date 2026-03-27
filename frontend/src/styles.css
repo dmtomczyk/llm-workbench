@@ -53,7 +53,16 @@ button { cursor: pointer; }
   letter-spacing: 0.04em;
 }
 .brand p { margin-top: 0.3rem; color: #8b949e; }
-.nav { display: grid; gap: 0.35rem; margin-top: 1.5rem; }
+.nav { display: grid; gap: 1rem; margin-top: 1.5rem; }
+.nav-section { display: grid; gap: 0.35rem; }
+.nav-section-label {
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #8b949e;
+  padding: 0 0.25rem;
+}
+.nav-section-items { display: grid; gap: 0.35rem; }
 .nav-link { padding: 0.75rem 0.85rem; border-radius: 0.65rem; color: #c9d1d9; }
 .nav-link.active, .nav-link:hover { background: #1f2937; }
 .main { display: flex; flex-direction: column; }

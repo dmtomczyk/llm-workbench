@@ -278,7 +278,14 @@ export function WorkbenchPage() {
   void tick;
 
   return (
-    <div className="grid two-col">
+    <div className="stack">
+      <div className="card stack">
+        <div>
+          <h2>Workbench</h2>
+          <p className="muted">Use Workbench for one-off prompt testing and structured runs before you save the pattern as a workflow or automation.</p>
+        </div>
+      </div>
+      <div className="grid two-col">
       <div className="stack">
         <div className="card">
           <h2>Upload dataset</h2>
@@ -432,6 +439,7 @@ export function WorkbenchPage() {
             ))}
           </ul>
         </div>
+      </div>
       </div>
     </div>
   );

@@ -93,60 +93,68 @@ export function DatasetsPage() {
   const sampleItems = preview?.preview?.sample_items;
 
   return (
-    <div className="grid two-col">
-      <div className="stack">
-        <div className="card">
-          <div className="row between wrap">
-            <h2>Datasets</h2>
-            {selectedDataset ? <a className="button-link" href={`/recipes?dataset_id=${encodeURIComponent(selectedDataset.id)}`}>Find recipes</a> : null}
-          </div>
-          {error ? <pre>{error}</pre> : null}
-          <ul className="list">
-            {datasets.length === 0 ? <li>No datasets yet.</li> : datasets.map((dataset) => (
-              <li key={dataset.id}>
-                <button type="button" className={selectedDatasetId === dataset.id ? 'session-button active' : 'session-button'} onClick={() => setSelectedDatasetId(dataset.id)}>
-                  <strong>{dataset.name}</strong>
-                  <div className="muted">{dataset.source_type ?? 'unknown source'} · v{dataset.latest_version_no ?? 0}</div>
-                  <div className="muted">rows: {dataset.latest_version?.row_count ?? 'unknown'} · {dataset.updated_at ?? dataset.created_at ?? '—'}</div>
-                </button>
-              </li>
-            ))}
-          </ul>
+    <div className="stack">
+      <div className="card stack">
+        <div>
+          <h2>Datasets</h2>
+          <p className="muted">Datasets are the core handoff object in BRIDGE: inspect the data here, then launch into chat, workbench, workflows, imports, or automations.</p>
         </div>
       </div>
-
-      <div className="stack">
-        <div className="card">
-          {!selectedDataset ? <p className="muted">Select a dataset to inspect it.</p> : (
-            <div className="stack">
-              <div className="row between wrap">
-                <div>
-                  <h2>{selectedDataset.name}</h2>
-                  <div className="muted">{selectedDataset.id}</div>
-                </div>
-                <div className="row wrap">
-                  <a className="button-link" href={`/chat?dataset_id=${encodeURIComponent(selectedDataset.id)}`}>Open in Chat</a>
-                  <a className="button-link" href={`/workbench?dataset_id=${encodeURIComponent(selectedDataset.id)}`}>Open in Workbench</a>
-                  <a className="button-link" href={`/workflows?dataset_id=${encodeURIComponent(selectedDataset.id)}`}>Use in Workflow</a>
-                  <a className="button-link" href={`/automations?target_type=template_prompt&dataset_id=${encodeURIComponent(selectedDataset.id)}`}>Seed Automation</a>
-                </div>
-              </div>
-              <div className="pill-row">
-                <span className="pill">Source: {selectedDataset.source_type ?? 'unknown'}</span>
-                <span className="pill">Latest version: {selectedDataset.latest_version_no ?? 0}</span>
-                <span className="pill">Rows: {selectedDataset.latest_version?.row_count ?? 'unknown'}</span>
-              </div>
-              <details open>
-                <summary>Source / provenance</summary>
-                <pre>{prettyJson({ source_type: selectedDataset.source_type, source_ref: selectedDataset.source_ref, media_type: selectedDataset.media_type, metadata: selectedDataset.metadata, latest_version: selectedDataset.latest_version })}</pre>
-              </details>
+      <div className="grid two-col">
+        <div className="stack">
+          <div className="card">
+            <div className="row between wrap">
+              <h2>Available datasets</h2>
+              {selectedDataset ? <a className="button-link" href={`/recipes?dataset_id=${encodeURIComponent(selectedDataset.id)}`}>Open imports</a> : null}
             </div>
-          )}
+            {error ? <pre>{error}</pre> : null}
+            <ul className="list">
+              {datasets.length === 0 ? <li>No datasets yet.</li> : datasets.map((dataset) => (
+                <li key={dataset.id}>
+                  <button type="button" className={selectedDatasetId === dataset.id ? 'session-button active' : 'session-button'} onClick={() => setSelectedDatasetId(dataset.id)}>
+                    <strong>{dataset.name}</strong>
+                    <div className="muted">{dataset.source_type ?? 'unknown source'} · v{dataset.latest_version_no ?? 0}</div>
+                    <div className="muted">rows: {dataset.latest_version?.row_count ?? 'unknown'} · {dataset.updated_at ?? dataset.created_at ?? '—'}</div>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
 
-        <div className="card">
-          <h2>Latest preview</h2>
-          {!preview ? <p className="muted">No preview available.</p> : isRecordArray(sampleItems) ? renderRecordTable(sampleItems) : <pre>{prettyJson(preview.preview ?? preview.normalized_payload ?? {})}</pre>}
+        <div className="stack">
+          <div className="card">
+            {!selectedDataset ? <p className="muted">Select a dataset to inspect it.</p> : (
+              <div className="stack">
+                <div className="row between wrap">
+                  <div>
+                    <h2>{selectedDataset.name}</h2>
+                    <div className="muted">{selectedDataset.id}</div>
+                  </div>
+                  <div className="row wrap">
+                    <a className="button-link" href={`/chat?dataset_id=${encodeURIComponent(selectedDataset.id)}`}>Open in Chat</a>
+                    <a className="button-link" href={`/workbench?dataset_id=${encodeURIComponent(selectedDataset.id)}`}>Open in Workbench</a>
+                    <a className="button-link" href={`/workflows?dataset_id=${encodeURIComponent(selectedDataset.id)}`}>Use in Workflow</a>
+                    <a className="button-link" href={`/automations?target_type=template_prompt&dataset_id=${encodeURIComponent(selectedDataset.id)}`}>Seed Automation</a>
+                  </div>
+                </div>
+                <div className="pill-row">
+                  <span className="pill">Source: {selectedDataset.source_type ?? 'unknown'}</span>
+                  <span className="pill">Latest version: {selectedDataset.latest_version_no ?? 0}</span>
+                  <span className="pill">Rows: {selectedDataset.latest_version?.row_count ?? 'unknown'}</span>
+                </div>
+                <details open>
+                  <summary>Source / provenance</summary>
+                  <pre>{prettyJson({ source_type: selectedDataset.source_type, source_ref: selectedDataset.source_ref, media_type: selectedDataset.media_type, metadata: selectedDataset.metadata, latest_version: selectedDataset.latest_version })}</pre>
+                </details>
+              </div>
+            )}
+          </div>
+
+          <div className="card">
+            <h2>Latest preview</h2>
+            {!preview ? <p className="muted">No preview available.</p> : isRecordArray(sampleItems) ? renderRecordTable(sampleItems) : <pre>{prettyJson(preview.preview ?? preview.normalized_payload ?? {})}</pre>}
+          </div>
         </div>
       </div>
     </div>

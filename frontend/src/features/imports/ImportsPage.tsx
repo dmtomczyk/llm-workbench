@@ -501,7 +501,14 @@ export function ImportsPage() {
   }
 
   return (
-    <div className="grid two-col">
+    <div className="stack">
+      <div className="card stack">
+        <div>
+          <h2>Imports</h2>
+          <p className="muted">Use Imports to bring in files or HTTP sources, preview what BRIDGE will parse, and save repeatable ingestion recipes.</p>
+        </div>
+      </div>
+      <div className="grid two-col">
       <div className="stack">
         <div className="card">
           <div className="row between wrap">
@@ -715,6 +722,7 @@ export function ImportsPage() {
             </div>
           )}
         </div>
+      </div>
       </div>
     </div>
   );

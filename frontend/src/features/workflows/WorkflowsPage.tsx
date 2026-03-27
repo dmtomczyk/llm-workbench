@@ -395,7 +395,14 @@ export function WorkflowsPage() {
   }
 
   return (
-    <div className="grid two-col">
+    <div className="stack">
+      <div className="card stack">
+        <div>
+          <h2>Workflows</h2>
+          <p className="muted">Use Workflows when a good chat or workbench pattern should become a reusable multi-step run.</p>
+        </div>
+      </div>
+      <div className="grid two-col">
       <div className="stack">
         <div className="card">
           <div className="row between">
@@ -557,6 +564,7 @@ export function WorkflowsPage() {
             </div>
           )}
         </div>
+      </div>
       </div>
     </div>
   );

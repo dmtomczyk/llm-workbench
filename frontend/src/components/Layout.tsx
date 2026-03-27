@@ -1,7 +1,7 @@
 import { ReactNode, useMemo, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 
-import { NAV_ITEMS } from '../routes/nav';
+import { NAV_SECTIONS } from '../routes/nav';
 import { ShellSubnavContext } from './shellSubnav';
 
 export function Layout() {
@@ -19,15 +19,23 @@ export function Layout() {
           <p>Where LLMs, tools, and data meet</p>
         </div>
         <nav className="nav">
-          {NAV_ITEMS.map((item) => (
-            <NavLink
-              key={item.route}
-              to={item.path}
-              className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}
-              end={item.path === '/'}
-            >
-              {item.label}
-            </NavLink>
+          {NAV_SECTIONS.map((section) => (
+            <div key={section.id} className="nav-section">
+              <div className="nav-section-label">{section.label}</div>
+              <div className="nav-section-items">
+                {section.items.map((item) => (
+                  <NavLink
+                    key={item.route}
+                    to={item.path}
+                    className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}
+                    end={item.path === '/'}
+                    title={item.description ?? item.label}
+                  >
+                    {item.label}
+                  </NavLink>
+                ))}
+              </div>
+            </div>
           ))}
         </nav>
       </aside>
@@ -36,7 +44,7 @@ export function Layout() {
         <header className="topbar">
           <div className="topbar-brand">
             <strong>BRIDGE</strong>
-            <span className="muted">Bridge for Reasoning, Interaction, Data, Guidance, and Execution</span>
+            <span className="muted">Grounded chat first; datasets, prompts, workflows, and automation behind it.</span>
           </div>
         </header>
         <section className="content">

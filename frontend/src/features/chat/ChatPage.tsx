@@ -47,6 +47,8 @@ type ContextInfo = {
   messages_total?: number;
   grounded?: boolean;
   grounding_dataset_ids?: string[];
+  grounding_dataset_names?: string[];
+  grounding_dataset_count?: number;
 };
 
 type ChatCompleteResponse = {
@@ -179,6 +181,12 @@ function describeStreamError(data: StreamEvent): string {
   if (data.runId) lines.push(`run: ${data.runId}`);
   if (data.detail) lines.push(JSON.stringify(data.detail, null, 2));
   return lines.join('\n');
+}
+
+function formatGroundingLabel(names: string[]): string {
+  if (names.length === 0) return 'Grounded';
+  if (names.length <= 2) return `Grounded: ${names.join(', ')}`;
+  return `Grounded: ${names.slice(0, 2).join(', ')} +${names.length - 2} more`;
 }
 
 export function ChatPage() {
@@ -714,6 +722,7 @@ export function ChatPage() {
           <div className="row between wrap">
             <div className="stack compact-stack">
               <h2>{selectedSession?.title ?? 'Chat'}</h2>
+              <div className="muted">Use Chat for grounded exploration first. Link datasets, ask questions, then branch into workbench or workflows when the process becomes more structured.</div>
               <div className="muted">{selectedSession ? `${providers.find((provider) => provider.id === selectedSession.provider_id)?.name ?? selectedSession.provider_id} · ${selectedSession.model_name ?? 'default model'}` : 'Create or select a session'}</div>
               {lastContextInfo ? (
                 <div className="muted">
@@ -721,6 +730,7 @@ export function ChatPage() {
                   {lastContextInfo.context_window ? ` / ${lastContextInfo.context_window}` : ''}
                   {lastContextInfo.max_output_tokens ? ` · reserved out ${lastContextInfo.max_output_tokens}` : ''}
                   {lastContextInfo.trimmed ? ' · older history trimmed' : ' · full history kept'}
+                  {lastContextInfo.grounded ? ` · ${formatGroundingLabel(lastContextInfo.grounding_dataset_names ?? [])}` : ''}
                 </div>
               ) : null}
             </div>
@@ -766,6 +776,7 @@ export function ChatPage() {
                 {lastContextInfo.context_window ? ` / ${lastContextInfo.context_window}` : ''}
                 {lastContextInfo.max_output_tokens ? ` · reserved out ${lastContextInfo.max_output_tokens}` : ''}
                 {typeof lastContextInfo.messages_included === 'number' && typeof lastContextInfo.messages_total === 'number' ? ` · included ${lastContextInfo.messages_included}/${lastContextInfo.messages_total} messages` : ''}
+                {lastContextInfo.grounded ? ` · ${formatGroundingLabel(lastContextInfo.grounding_dataset_names ?? [])}` : ''}
               </span>
             </div>
           ) : null}
@@ -775,6 +786,9 @@ export function ChatPage() {
             const groundedIds = Array.isArray(message.metadata?.grounding_dataset_ids)
               ? (message.metadata?.grounding_dataset_ids as string[])
               : [];
+            const groundedNames = Array.isArray(message.metadata?.grounding_dataset_names)
+              ? (message.metadata?.grounding_dataset_names as string[])
+              : [];
             return (
               <div key={message.id} className={message.role === 'assistant' ? 'message assistant' : message.role === 'system' ? 'message system' : 'message user'}>
                 <div className="message-role">{message.role}</div>
@@ -782,7 +796,7 @@ export function ChatPage() {
                   <div className="pill-row">
                     {interrupted ? <span className="pill">Interrupted</span> : null}
                     {regenerated ? <span className="pill">Regenerated</span> : null}
-                    {groundedIds.length > 0 ? <span className="pill">Grounded: {groundedIds.length} dataset{groundedIds.length === 1 ? '' : 's'}</span> : null}
+                    {groundedIds.length > 0 ? <span className="pill">{formatGroundingLabel(groundedNames)}</span> : null}
                   </div>
                 ) : null}
                 <pre>{message.content}</pre>
