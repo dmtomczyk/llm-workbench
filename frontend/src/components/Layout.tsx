@@ -1,10 +1,18 @@
-import { NavLink, Outlet } from 'react-router-dom';
+import { ReactNode, useMemo, useState } from 'react';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
 
 import { NAV_ITEMS } from '../routes/nav';
+import { ShellSubnavContext } from './shellSubnav';
 
 export function Layout() {
+  const location = useLocation();
+  const [subnav, setSubnav] = useState<ReactNode>(null);
+  const hasSubnav = Boolean(subnav);
+  const shellClassName = useMemo(() => `shell${hasSubnav ? ' shell-with-subnav' : ''}${location.pathname.startsWith('/chat') ? ' shell-chat-route' : ''}`, [hasSubnav, location.pathname]);
+
   return (
-    <div className="shell">
+    <ShellSubnavContext.Provider value={{ setSubnav }}>
+      <div className={shellClassName}>
       <aside className="sidebar">
         <div className="brand">
           <h1 className="brand-logo">BRIDGE</h1>
@@ -23,6 +31,7 @@ export function Layout() {
           ))}
         </nav>
       </aside>
+      {hasSubnav ? <aside className="contextual-sidebar">{subnav}</aside> : null}
       <main className="main">
         <header className="topbar">
           <div className="topbar-brand">
@@ -34,6 +43,7 @@ export function Layout() {
           <Outlet />
         </section>
       </main>
-    </div>
+      </div>
+    </ShellSubnavContext.Provider>
   );
 }

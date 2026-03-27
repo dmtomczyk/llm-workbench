@@ -1,5 +1,6 @@
 import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
 
+import { useShellSubnav } from '../../components/shellSubnav';
 import { api } from '../../lib/api';
 
 type Provider = {
@@ -9,9 +10,12 @@ type Provider = {
   default_model?: string;
   capabilities?: Record<string, unknown>;
 };
+
 type Dataset = { id: string; name: string };
+
 type ProviderModelsResponse = { ok: boolean; provider_id: string; models: string[]; source?: string | null; message?: string | null };
 type ProviderModelCache = { models: string[]; fetchedAt: number; message?: string | null };
+
 type ChatSession = {
   id: string;
   title: string;
@@ -23,6 +27,7 @@ type ChatSession = {
   updated_at: string;
   metadata?: Record<string, unknown>;
 };
+
 type ChatMessage = {
   id: string;
   session_id: string;
@@ -39,6 +44,8 @@ type ContextInfo = {
   estimated_input_tokens?: number;
   messages_included?: number;
   messages_total?: number;
+  grounded?: boolean;
+  grounding_dataset_ids?: string[];
 };
 
 type ChatCompleteResponse = {
@@ -54,17 +61,50 @@ type ChatCompleteResponse = {
 };
 
 type StreamEvent = {
-  sessionId?: string;
   runId?: string;
-  auditId?: string;
-  messageId?: string;
   content?: string;
-  delta?: string;
   message?: string;
   statusCode?: number;
   detail?: Record<string, unknown>;
   contextInfo?: ContextInfo;
 };
+
+type LinkedGrounding = { dataset_ids?: string[]; dataset_id?: string };
+
+function linkedDatasetIds(metadata: Record<string, unknown> | undefined): string[] {
+  const grounding = metadata?.grounding as LinkedGrounding | undefined;
+  if (!grounding) return [];
+  if (Array.isArray(grounding.dataset_ids)) return grounding.dataset_ids.filter((item): item is string => typeof item === 'string' && item.length > 0);
+  if (typeof grounding.dataset_id === 'string' && grounding.dataset_id) return [grounding.dataset_id];
+  return [];
+}
+
+function sessionGroupLabel(updatedAt: string): string {
+  const date = new Date(updatedAt);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const target = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const diffDays = Math.round((today - target) / 86400000);
+  if (diffDays <= 0) return 'Today';
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays < 7) return 'This Week';
+  return 'Earlier';
+}
+
+function modelWarning(model: string, models: string[]): string {
+  if (!model || models.length === 0) return '';
+  return models.includes(model) ? '' : 'Selected model is not in the last fetched provider model list.';
+}
+
+function getModelSettings(capabilities: Record<string, unknown> | undefined, model: string | undefined): { contextWindow?: number; maxOutputTokens?: number } {
+  if (!capabilities || !model) return {};
+  const modelSettings = (capabilities.model_settings as Record<string, unknown> | undefined) ?? {};
+  const settings = (modelSettings[model] as Record<string, unknown> | undefined) ?? {};
+  return {
+    contextWindow: typeof settings.context_window === 'number' ? settings.context_window : undefined,
+    maxOutputTokens: typeof settings.max_output_tokens === 'number' ? settings.max_output_tokens : undefined,
+  };
+}
 
 function ModelPicker({
   value,
@@ -114,18 +154,9 @@ function ModelPicker({
       >
         <option value="__none__">Default model</option>
         <option value="__custom__">Custom override…</option>
-        {models.map((model) => (
-          <option key={model} value={model}>{model}</option>
-        ))}
+        {models.map((model) => <option key={model} value={model}>{model}</option>)}
       </select>
-      {customMode ? (
-        <input
-          id={inputId}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          placeholder={inputPlaceholder}
-        />
-      ) : null}
+      {customMode ? <input id={inputId} value={value} onChange={(event) => onChange(event.target.value)} placeholder={inputPlaceholder} /> : null}
     </div>
   );
 }
@@ -143,66 +174,109 @@ function describeStreamError(data: StreamEvent): string {
   return lines.join('\n');
 }
 
-function modelWarning(model: string, models: string[]): string {
-  if (!model || models.length === 0) return '';
-  return models.includes(model) ? '' : 'Selected model is not in the last fetched provider model list.';
-}
-
-function getModelSettings(capabilities: Record<string, unknown> | undefined, model: string | undefined): { contextWindow?: number; maxOutputTokens?: number } {
-  if (!capabilities || !model) return {};
-  const modelSettings = (capabilities.model_settings as Record<string, unknown> | undefined) ?? {};
-  const settings = (modelSettings[model] as Record<string, unknown> | undefined) ?? {};
-  return {
-    contextWindow: typeof settings.context_window === 'number' ? settings.context_window : undefined,
-    maxOutputTokens: typeof settings.max_output_tokens === 'number' ? settings.max_output_tokens : undefined,
-  };
-}
-
 export function ChatPage() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
-  const [selectedSessionId, setSelectedSessionId] = useState<string>('');
+  const [selectedSessionId, setSelectedSessionId] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [error, setError] = useState<string>('');
+  const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
   const [streamEnabled, setStreamEnabled] = useState(true);
   const [showSessionSettings, setShowSessionSettings] = useState(false);
+  const [showSessionMenuModal, setShowSessionMenuModal] = useState(false);
+  const [menuSessionId, setMenuSessionId] = useState('');
+  const [showLinkDatasetModal, setShowLinkDatasetModal] = useState(false);
   const [composerText, setComposerText] = useState('');
   const [streamingReply, setStreamingReply] = useState('');
-  const [newTitle, setNewTitle] = useState('');
   const [newProviderId, setNewProviderId] = useState('');
   const [newModelName, setNewModelName] = useState('');
   const [newSystemPrompt, setNewSystemPrompt] = useState('');
-  const [newDatasetId, setNewDatasetId] = useState('');
+  const [newLinkedDatasetIds, setNewLinkedDatasetIds] = useState<string[]>([]);
+  const [datasetSearch, setDatasetSearch] = useState('');
   const [draftTitle, setDraftTitle] = useState('');
   const [draftProviderId, setDraftProviderId] = useState('');
   const [draftModelName, setDraftModelName] = useState('');
   const [draftSystemPrompt, setDraftSystemPrompt] = useState('');
-  const [draftDatasetId, setDraftDatasetId] = useState('');
+  const [headerLinkedDatasetIds, setHeaderLinkedDatasetIds] = useState<string[]>([]);
   const [providerModels, setProviderModels] = useState<Record<string, ProviderModelCache>>({});
   const [lastContextInfo, setLastContextInfo] = useState<ContextInfo | null>(null);
 
+  const { setSubnav } = useShellSubnav();
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const selectedSession = useMemo(
-    () => sessions.find((session) => session.id === selectedSessionId) ?? null,
-    [sessions, selectedSessionId],
-  );
-  const selectedProvider = useMemo(
-    () => providers.find((provider) => provider.id === (selectedSession?.provider_id ?? draftProviderId)) ?? null,
-    [providers, selectedSession?.provider_id, draftProviderId],
-  );
-  const groundedDatasetId = (selectedSession?.metadata?.grounding as Record<string, unknown> | undefined)?.dataset_id as string | undefined;
-  const groundedDataset = useMemo(() => datasets.find((dataset) => dataset.id === groundedDatasetId) ?? null, [datasets, groundedDatasetId]);
-
+  const selectedSession = useMemo(() => sessions.find((session) => session.id === selectedSessionId) ?? null, [sessions, selectedSessionId]);
+  const menuSession = useMemo(() => sessions.find((session) => session.id === menuSessionId) ?? null, [sessions, menuSessionId]);
+  const selectedProvider = useMemo(() => providers.find((provider) => provider.id === (selectedSession?.provider_id ?? draftProviderId)) ?? null, [providers, selectedSession?.provider_id, draftProviderId]);
+  const selectedLinkedDatasetIds = linkedDatasetIds(selectedSession?.metadata);
+  const linkedDatasets = useMemo(() => datasets.filter((dataset) => selectedLinkedDatasetIds.includes(dataset.id)), [datasets, selectedLinkedDatasetIds]);
   const newChatModels = providerModels[newProviderId]?.models ?? [];
   const draftModels = providerModels[draftProviderId]?.models ?? [];
   const newChatModelWarning = modelWarning(newModelName, newChatModels);
   const draftModelWarning = modelWarning(draftModelName, draftModels);
   const effectiveChatModel = draftModelName || selectedSession?.model_name || selectedProvider?.default_model;
   const effectiveModelSettings = getModelSettings(selectedProvider?.capabilities, effectiveChatModel);
+  const selectedSessionHasProvider = Boolean(selectedSession?.provider_id);
+  const filteredDatasets = useMemo(() => {
+    const q = datasetSearch.trim().toLowerCase();
+    if (!q) return datasets;
+    return datasets.filter((dataset) => dataset.name.toLowerCase().includes(q) || dataset.id.toLowerCase().includes(q));
+  }, [datasets, datasetSearch]);
+  const groupedSessions = useMemo(() => {
+    const sorted = [...sessions].sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+    const buckets: Record<string, ChatSession[]> = { Today: [], Yesterday: [], 'This Week': [], Earlier: [] };
+    for (const session of sorted) {
+      buckets[sessionGroupLabel(session.updated_at)].push(session);
+    }
+    return (['Today', 'Yesterday', 'This Week', 'Earlier'] as const)
+      .map((label) => [label, buckets[label]] as const)
+      .filter(([, group]) => group.length > 0);
+  }, [sessions]);
+
+  const chatSubnav = useMemo(() => (
+    <div className="contextual-subnav chat-contextual-subnav">
+      <div className="card chat-sidebar-card">
+        <div className="chat-subnav-header">
+          <button type="button" className="chat-new-button" onClick={() => void onCreateSession()}>+ New Chat</button>
+        </div>
+        <div className="chat-subnav-list">
+          {groupedSessions.map(([label, group]) => (
+            <div key={label} className="chat-session-group">
+              <div className="muted chat-group-label">{label}</div>
+              <ul className="session-list compact-session-list">
+                {group.map((session) => {
+                  const ids = linkedDatasetIds(session.metadata);
+                  return (
+                    <li key={session.id} className="session-row-item">
+                      <div className={selectedSessionId === session.id ? 'session-row active' : 'session-row'}>
+                        <button className={selectedSessionId === session.id ? 'session-button active compact-session-button' : 'session-button compact-session-button'} onClick={() => setSelectedSessionId(session.id)} type="button" title={session.title}>
+                          <strong className="session-title-line">{session.title}</strong>
+                        </button>
+                        <button
+                          type="button"
+                          className="session-menu-button"
+                          aria-label={`Open options for ${session.title}`}
+                          title="Session options"
+                          onClick={() => {
+                            setMenuSessionId(session.id);
+                            setShowSessionMenuModal(true);
+                          }}
+                        >
+                          ⋯
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
+          {sessions.length === 0 ? <div className="muted">No chat sessions yet.</div> : null}
+        </div>
+      </div>
+    </div>
+  ), [groupedSessions, selectedSessionId, sessions.length]);
 
   async function ensureProviderModels(providerId: string, force = false) {
     if (!providerId) return;
@@ -211,16 +285,9 @@ export function ChatPage() {
     if (!force && isFresh) return;
     try {
       const result = await api<ProviderModelsResponse>(`/api/providers/${providerId}/models`);
-      setProviderModels((current) => ({
-        ...current,
-        [providerId]: {
-          models: result.models,
-          fetchedAt: Date.now(),
-          message: result.message,
-        },
-      }));
+      setProviderModels((current) => ({ ...current, [providerId]: { models: result.models, fetchedAt: Date.now(), message: result.message } }));
     } catch {
-      // Ignore model list failures in chat setup; freeform entry still works.
+      // ignore
     }
   }
 
@@ -250,63 +317,53 @@ export function ChatPage() {
     setMessages(data);
   }
 
-  useEffect(() => {
-    void loadProvidersAndSessions();
-  }, []);
+  useEffect(() => { void loadProvidersAndSessions(); }, []);
 
   useEffect(() => {
-    void loadMessages(selectedSessionId);
-  }, [selectedSessionId]);
+    const params = new URLSearchParams(window.location.search);
+    const datasetId = params.get('dataset_id') || '';
+    if (datasetId) setNewLinkedDatasetIds([datasetId]);
+  }, []);
+
+  useEffect(() => { void loadMessages(selectedSessionId); }, [selectedSessionId]);
 
   useEffect(() => {
     setDraftTitle(selectedSession?.title ?? '');
     setDraftProviderId(selectedSession?.provider_id ?? '');
     setDraftModelName(selectedSession?.model_name ?? '');
     setDraftSystemPrompt(selectedSession?.system_prompt ?? '');
-    setDraftDatasetId(((selectedSession?.metadata?.grounding as Record<string, unknown> | undefined)?.dataset_id as string | undefined) ?? '');
+    setHeaderLinkedDatasetIds(linkedDatasetIds(selectedSession?.metadata));
   }, [selectedSession]);
 
-  useEffect(() => {
-    if (newProviderId) void ensureProviderModels(newProviderId);
-  }, [newProviderId]);
+  useEffect(() => { if (newProviderId) void ensureProviderModels(newProviderId); }, [newProviderId]);
+  useEffect(() => { if (draftProviderId) void ensureProviderModels(draftProviderId); }, [draftProviderId]);
+  useEffect(() => { if (transcriptRef.current) transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight; }, [messages, streamingReply]);
+  useEffect(() => { if (selectedSessionId && !sending) window.setTimeout(() => composerRef.current?.focus(), 0); }, [selectedSessionId, sending]);
 
   useEffect(() => {
-    if (draftProviderId) void ensureProviderModels(draftProviderId);
-  }, [draftProviderId]);
+    setSubnav(chatSubnav);
+    return () => setSubnav(null);
+  }, [chatSubnav, setSubnav]);
 
-  useEffect(() => {
-    if (!transcriptRef.current) return;
-    transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
-  }, [messages, streamingReply]);
+  function buildMetadata(datasetIds: string[]) {
+    return datasetIds.length > 0 ? { grounding: { dataset_ids: datasetIds } } : {};
+  }
 
-  useEffect(() => {
-    if (!selectedSessionId || sending) return;
-    window.setTimeout(() => composerRef.current?.focus(), 0);
-  }, [selectedSessionId, sending]);
-
-  useEffect(() => {
-    if (!selectedSessionId) return;
-    window.setTimeout(() => composerRef.current?.focus(), 0);
-  }, []);
-
-  async function onCreateSession(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function onCreateSession() {
     setError('');
     try {
       const created = await api<ChatSession>('/api/chat/sessions', {
         method: 'POST',
         body: JSON.stringify({
-          title: newTitle || undefined,
-          provider_id: newProviderId,
+          provider_id: newProviderId || '',
           model_name: newModelName || undefined,
           system_prompt: newSystemPrompt || undefined,
-          metadata: newDatasetId ? { grounding: { dataset_id: newDatasetId } } : {},
+          metadata: buildMetadata(newLinkedDatasetIds),
         }),
       });
-      setNewTitle('');
       setNewModelName('');
       setNewSystemPrompt('');
-      setNewDatasetId('');
+      setNewLinkedDatasetIds([]);
       await loadProvidersAndSessions(created.id);
       window.setTimeout(() => composerRef.current?.focus(), 0);
     } catch (err) {
@@ -325,25 +382,49 @@ export function ChatPage() {
           provider_id: draftProviderId,
           model_name: draftModelName || null,
           system_prompt: draftSystemPrompt || null,
-          metadata: draftDatasetId ? { grounding: { dataset_id: draftDatasetId } } : {},
+          metadata: buildMetadata(headerLinkedDatasetIds),
         }),
       });
       setLastContextInfo(null);
       await loadProvidersAndSessions(updated.id);
-      window.setTimeout(() => composerRef.current?.focus(), 0);
     } catch (err) {
       setError(formatChatError(err));
     }
   }
 
-  async function onDeleteSession() {
+  async function onApplyLinkedDatasets() {
     if (!selectedSession) return;
-    if (!window.confirm(`Delete chat session "${selectedSession.title}"?`)) return;
     setError('');
     try {
-      await api(`/api/chat/sessions/${selectedSession.id}`, { method: 'DELETE' });
+      const updated = await api<ChatSession>(`/api/chat/sessions/${selectedSession.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          title: selectedSession.title,
+          provider_id: selectedSession.provider_id,
+          model_name: selectedSession.model_name || null,
+          system_prompt: selectedSession.system_prompt || null,
+          metadata: buildMetadata(headerLinkedDatasetIds),
+        }),
+      });
+      setShowLinkDatasetModal(false);
+      await loadProvidersAndSessions(updated.id);
+      await loadMessages(updated.id);
+    } catch (err) {
+      setError(formatChatError(err));
+    }
+  }
+
+  async function onDeleteSession(sessionOverride?: ChatSession | null) {
+    const targetSession = sessionOverride ?? selectedSession;
+    if (!targetSession) return;
+    if (!window.confirm(`Delete chat session "${targetSession.title}"?`)) return;
+    setError('');
+    try {
+      await api(`/api/chat/sessions/${targetSession.id}`, { method: 'DELETE' });
       setMessages([]);
       setStreamingReply('');
+      setShowSessionMenuModal(false);
+      setMenuSessionId('');
       await loadProvidersAndSessions();
     } catch (err) {
       setError(formatChatError(err));
@@ -365,14 +446,7 @@ export function ChatPage() {
     if (!selectedSessionId) return;
     const content = composerText.trim();
     if (!content) return;
-    const optimisticMessage: ChatMessage = {
-      id: `temp-user-${Date.now()}`,
-      session_id: selectedSessionId,
-      role: 'user',
-      content,
-      sequence_no: messages.length + 1,
-      created_at: new Date().toISOString(),
-    };
+    const optimisticMessage: ChatMessage = { id: `temp-user-${Date.now()}`, session_id: selectedSessionId, role: 'user', content, sequence_no: messages.length + 1, created_at: new Date().toISOString() };
     setMessages((current) => [...current, optimisticMessage]);
     setSending(true);
     setError('');
@@ -381,14 +455,9 @@ export function ChatPage() {
       if (streamEnabled) {
         await streamSend(selectedSessionId, content);
       } else {
-        const result = await api<ChatCompleteResponse>(`/api/chat/sessions/${selectedSessionId}/complete`, {
-          method: 'POST',
-          body: JSON.stringify({ content }),
-        });
+        const result = await api<ChatCompleteResponse>(`/api/chat/sessions/${selectedSessionId}/complete`, { method: 'POST', body: JSON.stringify({ content }) });
         setLastContextInfo(result.provider_result.context_info ?? null);
-        if (result.provider_result.status !== 'success') {
-          throw new Error(`Provider returned ${result.provider_result.status}: ${result.provider_result.summary}`);
-        }
+        if (result.provider_result.status !== 'success') throw new Error(`Provider returned ${result.provider_result.status}: ${result.provider_result.summary}`);
       }
       await loadProvidersAndSessions(selectedSessionId);
       await loadMessages(selectedSessionId);
@@ -405,51 +474,32 @@ export function ChatPage() {
   }
 
   async function streamSend(sessionId: string, content: string) {
-    const response = await fetch(`/api/chat/sessions/${sessionId}/stream`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content }),
-    });
-
-    if (!response.ok || !response.body) {
-      const rawText = await response.text();
-      throw new Error(rawText || 'Streaming request failed');
-    }
-
+    const response = await fetch(`/api/chat/sessions/${sessionId}/stream`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content }) });
+    if (!response.ok || !response.body) throw new Error(await response.text() || 'Streaming request failed');
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
-
     while (true) {
       const { value, done } = await reader.read();
       buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
       const parts = buffer.split('\n\n');
       buffer = parts.pop() || '';
       for (const part of parts) {
-        processSseEvent(part, (eventName, data) => {
-          if (data.contextInfo) setLastContextInfo(data.contextInfo);
-          if (eventName === 'chunk') {
-            setStreamingReply(data.content || '');
-          } else if (eventName === 'error') {
-            throw new Error(describeStreamError(data));
-          }
-        });
+        const lines = part.split('\n');
+        let eventName = 'message';
+        const dataLines: string[] = [];
+        for (const line of lines) {
+          if (line.startsWith('event:')) eventName = line.slice(6).trim();
+          if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+        }
+        if (dataLines.length === 0) continue;
+        const data = JSON.parse(dataLines.join('\n')) as StreamEvent;
+        if (data.contextInfo) setLastContextInfo(data.contextInfo);
+        if (eventName === 'chunk') setStreamingReply(data.content || '');
+        if (eventName === 'error') throw new Error(describeStreamError(data));
       }
       if (done) break;
     }
-    window.setTimeout(() => composerRef.current?.focus(), 0);
-  }
-
-  function processSseEvent(block: string, onEvent: (eventName: string, data: StreamEvent) => void) {
-    const lines = block.split('\n');
-    let eventName = 'message';
-    const dataLines: string[] = [];
-    for (const line of lines) {
-      if (line.startsWith('event:')) eventName = line.slice(6).trim();
-      if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
-    }
-    if (dataLines.length === 0) return;
-    onEvent(eventName, JSON.parse(dataLines.join('\n')) as StreamEvent);
   }
 
   function onComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -459,139 +509,55 @@ export function ChatPage() {
     event.currentTarget.form?.requestSubmit();
   }
 
+  function toggleDatasetSelection(datasetId: string, selectedIds: string[], setSelectedIds: (ids: string[]) => void) {
+    setSelectedIds(selectedIds.includes(datasetId) ? selectedIds.filter((id) => id !== datasetId) : [...selectedIds, datasetId]);
+  }
+
   return (
-    <div className="grid chat-layout chat-page">
-      <div className="stack chat-sidebar">
-        <div className="card">
-          <h2>New chat</h2>
-          <form className="stack" onSubmit={onCreateSession}>
-            <input value={newTitle} onChange={(event) => setNewTitle(event.target.value)} placeholder="Optional title" />
-            <select value={newProviderId} onChange={(event) => setNewProviderId(event.target.value)} required>
-              {providers.map((provider) => (
-                <option key={provider.id} value={provider.id}>{provider.name}</option>
-              ))}
-            </select>
-            <ModelPicker
-              value={newModelName}
-              models={newChatModels}
-              onChange={setNewModelName}
-              selectId="new-chat-model-select"
-              inputId="new-chat-model-input"
-              inputPlaceholder="Custom model override"
-            />
-            {providerModels[newProviderId]?.fetchedAt ? <div className="muted">Models fetched {new Date(providerModels[newProviderId].fetchedAt).toLocaleTimeString()}</div> : null}
-            {newChatModelWarning ? <div className="muted">{newChatModelWarning}</div> : null}
-            <select value={newDatasetId} onChange={(event) => setNewDatasetId(event.target.value)}>
-              <option value="">No grounding dataset</option>
-              {datasets.map((dataset) => <option key={dataset.id} value={dataset.id}>{dataset.name}</option>)}
-            </select>
-            <textarea value={newSystemPrompt} onChange={(event) => setNewSystemPrompt(event.target.value)} placeholder="Optional system prompt" rows={4} />
-            <button type="submit">Create chat</button>
-          </form>
-          <p className="muted">For a no-setup test, pick <strong>demo-mock</strong>. For a real local model, try <strong>ollama-local</strong>.</p>
-        </div>
-
-        <div className="card">
-          <h2>Sessions</h2>
-          <ul className="list session-list">
-            {sessions.map((session) => (
-              <li key={session.id}>
-                <button
-                  className={selectedSessionId === session.id ? 'session-button active' : 'session-button'}
-                  onClick={() => setSelectedSessionId(session.id)}
-                  type="button"
-                >
-                  <strong>{session.title}</strong>
-                  <div className="muted">{providers.find((provider) => provider.id === session.provider_id)?.name ?? session.provider_id}</div>
-                  {((session.metadata?.grounding as Record<string, unknown> | undefined)?.dataset_id as string | undefined) ? <div className="muted">grounded</div> : null}
-                  <div className="muted">{session.last_message_preview ?? 'No messages yet'}</div>
-                </button>
-              </li>
-            ))}
-            {sessions.length === 0 ? <li>No chat sessions yet.</li> : null}
-          </ul>
-        </div>
-      </div>
-
+    <div className="stack chat-page-single">
       <div className="card stack chat-main-panel">
         <div className="chat-header-controls stack">
-          <div className="row between">
-            <div>
+          <div className="row between wrap">
+            <div className="stack compact-stack">
               <h2>{selectedSession?.title ?? 'Chat'}</h2>
               <div className="muted">{selectedSession ? `${providers.find((provider) => provider.id === selectedSession.provider_id)?.name ?? selectedSession.provider_id} · ${selectedSession.model_name ?? 'default model'}` : 'Create or select a session'}</div>
-              <div className="muted">
-                Effective model: {effectiveChatModel ?? 'provider default / unset'}
-                {effectiveChatModel
-                  ? (effectiveModelSettings.contextWindow || effectiveModelSettings.maxOutputTokens
-                    ? `${effectiveModelSettings.contextWindow ? ` · ctx ${effectiveModelSettings.contextWindow}` : ''}${effectiveModelSettings.maxOutputTokens ? ` · max out ${effectiveModelSettings.maxOutputTokens}` : ''}`
-                    : ' · no configured model profile')
-                  : ''}
-              </div>
-              {groundedDataset ? (
-                <div className="row wrap">
-                  <span className="pill">Grounded by {groundedDataset.name}</span>
-                  <a className="button-link" href={`/workbench?dataset_id=${encodeURIComponent(groundedDataset.id)}`}>Open dataset in Workbench</a>
-                </div>
-              ) : null}
               {lastContextInfo ? (
                 <div className="muted">
                   Context usage: ~{lastContextInfo.estimated_input_tokens ?? '—'} input tokens
                   {lastContextInfo.context_window ? ` / ${lastContextInfo.context_window}` : ''}
                   {lastContextInfo.max_output_tokens ? ` · reserved out ${lastContextInfo.max_output_tokens}` : ''}
-                  {typeof lastContextInfo.messages_included === 'number' && typeof lastContextInfo.messages_total === 'number'
-                    ? ` · included ${lastContextInfo.messages_included}/${lastContextInfo.messages_total} messages`
-                    : ''}
                   {lastContextInfo.trimmed ? ' · older history trimmed' : ' · full history kept'}
                 </div>
               ) : null}
             </div>
             <div className="row wrap">
-              <button type="button" onClick={() => setShowSessionSettings((current) => !current)} disabled={!selectedSession}>
-                {showSessionSettings ? 'Hide settings' : 'Show settings'}
-              </button>
+              <button type="button" onClick={() => setShowLinkDatasetModal(true)} disabled={!selectedSession}>Link Dataset</button>
+              <button type="button" onClick={() => setShowSessionSettings((current) => !current)} disabled={!selectedSession}>{showSessionSettings ? 'Hide settings' : 'Settings'}</button>
               <button type="button" onClick={() => exportTranscript('markdown')} disabled={!selectedSession}>Export .md</button>
               <button type="button" onClick={() => exportTranscript('txt')} disabled={!selectedSession}>Export .txt</button>
-              <button type="button" onClick={onDeleteSession} disabled={!selectedSession} className="danger-button">Delete</button>
+              <button type="button" onClick={() => { void onDeleteSession(); }} disabled={!selectedSession} className="danger-button">Delete</button>
             </div>
+          </div>
+
+          <div className="row wrap">
+            {linkedDatasets.length > 0 ? linkedDatasets.map((dataset) => (
+              <span key={dataset.id} className="pill">{dataset.name}</span>
+            )) : <span className="pill">No linked datasets</span>}
           </div>
 
           {selectedSession && showSessionSettings ? (
             <div className="chat-header-grid">
               <input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} placeholder="Session title" />
-              <select value={draftProviderId} onChange={(event) => setDraftProviderId(event.target.value)}>
-                {providers.map((provider) => (
-                  <option key={provider.id} value={provider.id}>{provider.name}</option>
-                ))}
-              </select>
-              <ModelPicker
-                value={draftModelName}
-                models={draftModels}
-                onChange={setDraftModelName}
-                selectId="draft-chat-model-select"
-                inputId="draft-chat-model-input"
-                inputPlaceholder="Custom model override"
-              />
+              <select value={draftProviderId} onChange={(event) => setDraftProviderId(event.target.value)}>{providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</select>
+              <ModelPicker value={draftModelName} models={draftModels} onChange={setDraftModelName} selectId="draft-chat-model-select" inputId="draft-chat-model-input" inputPlaceholder="Custom model override" />
               {providerModels[draftProviderId]?.fetchedAt ? <div className="muted">Models fetched {new Date(providerModels[draftProviderId].fetchedAt).toLocaleTimeString()}</div> : null}
               {draftModelWarning ? <div className="muted">{draftModelWarning}</div> : null}
-              <select value={draftDatasetId} onChange={(event) => setDraftDatasetId(event.target.value)}>
-                <option value="">No grounding dataset</option>
-                {datasets.map((dataset) => <option key={dataset.id} value={dataset.id}>{dataset.name}</option>)}
-              </select>
               <textarea value={draftSystemPrompt} onChange={(event) => setDraftSystemPrompt(event.target.value)} rows={3} placeholder="System prompt" className="chat-system-prompt" />
-              <div className="row between">
-                <label className="checkbox-row">
-                  <input type="checkbox" checked={streamEnabled} onChange={(event) => setStreamEnabled(event.target.checked)} />
-                  <span>Stream responses</span>
-                </label>
+              <div className="row between wrap">
+                <label className="checkbox-row"><input type="checkbox" checked={streamEnabled} onChange={(event) => setStreamEnabled(event.target.checked)} /><span>Stream responses</span></label>
                 <button type="button" onClick={onSaveSession}>Save session settings</button>
               </div>
-              <div className="muted">
-                Configured model limits: context {effectiveModelSettings.contextWindow ?? 'not set'} · max output {effectiveModelSettings.maxOutputTokens ?? 'not set'}
-              </div>
-              <div className="muted">Current chat context handling: saved session history is replayed on each turn, but BRIDGE now trims older messages when a configured context window would be exceeded and passes configured max output tokens to the provider when supported.</div>
-              {lastContextInfo ? (
-                <div className="muted">Latest send: ~{lastContextInfo.estimated_input_tokens ?? '—'} input tokens · included {lastContextInfo.messages_included ?? '—'}/{lastContextInfo.messages_total ?? '—'} messages{lastContextInfo.trimmed ? ' · trimming active' : ' · no trimming needed'}</div>
-              ) : null}
+              <div className="muted">Configured model limits: context {effectiveModelSettings.contextWindow ?? 'not set'} · max output {effectiveModelSettings.maxOutputTokens ?? 'not set'}</div>
             </div>
           ) : null}
         </div>
@@ -604,12 +570,7 @@ export function ChatPage() {
                 ~{lastContextInfo.estimated_input_tokens ?? '—'} input tokens
                 {lastContextInfo.context_window ? ` / ${lastContextInfo.context_window}` : ''}
                 {lastContextInfo.max_output_tokens ? ` · reserved out ${lastContextInfo.max_output_tokens}` : ''}
-                {typeof lastContextInfo.messages_included === 'number' && typeof lastContextInfo.messages_total === 'number'
-                  ? ` · included ${lastContextInfo.messages_included}/${lastContextInfo.messages_total} messages`
-                  : ''}
-                {lastContextInfo.trimmed
-                  ? ` · dropped ${Math.max(0, (lastContextInfo.messages_total ?? 0) - (lastContextInfo.messages_included ?? 0))} older messages`
-                  : ' · no trimming needed'}
+                {typeof lastContextInfo.messages_included === 'number' && typeof lastContextInfo.messages_total === 'number' ? ` · included ${lastContextInfo.messages_included}/${lastContextInfo.messages_total} messages` : ''}
               </span>
             </div>
           ) : null}
@@ -619,22 +580,87 @@ export function ChatPage() {
               <pre>{message.content}</pre>
             </div>
           ))}
-          {streamingReply ? (
-            <div className="message assistant streaming-message">
-              <div className="message-role">assistant · streaming</div>
-              <pre>{streamingReply}</pre>
-            </div>
-          ) : null}
+          {streamingReply ? <div className="message assistant streaming-message"><div className="message-role">assistant · streaming</div><pre>{streamingReply}</pre></div> : null}
         </div>
 
         <form className="stack chat-composer" onSubmit={onSend}>
-          <textarea ref={composerRef} value={composerText} onChange={(event) => setComposerText(event.target.value)} onKeyDown={onComposerKeyDown} name="content" placeholder={selectedSessionId ? 'Type your message…' : 'Create or select a chat first'} rows={5} disabled={!selectedSessionId || sending} />
+          {!selectedSessionHasProvider && selectedSession ? (
+            <div className="notice error">
+              <strong>Provider required.</strong> This chat was created without a provider. Open <strong>Settings</strong> and choose one before sending messages.
+            </div>
+          ) : null}
+          <textarea ref={composerRef} value={composerText} onChange={(event) => setComposerText(event.target.value)} onKeyDown={onComposerKeyDown} name="content" placeholder={selectedSessionId ? (selectedSessionHasProvider ? 'Type your message…' : 'Choose a provider in Settings to enable chatting') : 'Create or select a chat first'} rows={5} disabled={!selectedSessionId || sending || !selectedSessionHasProvider} />
           <div className="row between wrap">
-            {error ? <pre>{error}</pre> : <span className="muted">Each send creates run, llm_interaction, chat_message, and audit records.</span>}
-            <button type="submit" disabled={!selectedSessionId || sending}>{sending ? (streamEnabled ? 'Streaming…' : 'Sending…') : (streamEnabled ? 'Send + stream' : 'Send')}</button>
+            {error ? <pre>{error}</pre> : <span className="muted">Linked datasets are injected into this session’s chat context.</span>}
+            <button type="submit" disabled={!selectedSessionId || sending || !selectedSessionHasProvider}>{sending ? (streamEnabled ? 'Streaming…' : 'Sending…') : (streamEnabled ? 'Send + stream' : 'Send')}</button>
           </div>
         </form>
       </div>
+
+      {showSessionMenuModal ? (
+        <div className="modal-backdrop" onClick={() => setShowSessionMenuModal(false)}>
+          <div className="modal-card modal-card-sm" onClick={(event) => event.stopPropagation()}>
+            <div className="row between wrap">
+              <h2>Session Options</h2>
+              <button type="button" onClick={() => setShowSessionMenuModal(false)}>Close</button>
+            </div>
+            <div className="muted">{menuSession?.title ?? 'Selected chat session'}</div>
+            <div className="stack">
+              <button type="button" onClick={() => {
+                if (menuSession) setSelectedSessionId(menuSession.id);
+                setShowSessionSettings(true);
+                setShowSessionMenuModal(false);
+              }}>Open settings</button>
+              <button type="button" onClick={() => {
+                if (menuSession) setSelectedSessionId(menuSession.id);
+                setShowLinkDatasetModal(true);
+                setShowSessionMenuModal(false);
+              }}>Link datasets</button>
+              <button type="button" onClick={() => {
+                if (!menuSession) return;
+                setSelectedSessionId(menuSession.id);
+                exportTranscript('markdown');
+                setShowSessionMenuModal(false);
+              }}>Export .md</button>
+              <button type="button" onClick={() => {
+                if (!menuSession) return;
+                setSelectedSessionId(menuSession.id);
+                exportTranscript('txt');
+                setShowSessionMenuModal(false);
+              }}>Export .txt</button>
+              <button type="button" className="danger-button" onClick={() => { void onDeleteSession(menuSession); }}>Delete session</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {showLinkDatasetModal ? (
+        <div className="modal-backdrop" onClick={() => setShowLinkDatasetModal(false)}>
+          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
+            <div className="row between wrap"><h2>Link Dataset</h2><button type="button" onClick={() => setShowLinkDatasetModal(false)}>Close</button></div>
+            <div className="muted">Choose one or more datasets to include in this chat session’s context.</div>
+            <input value={datasetSearch} onChange={(event) => setDatasetSearch(event.target.value)} placeholder="Search datasets by name or ID" />
+            <div className="row wrap">
+              <span className="pill">{filteredDatasets.length} shown</span>
+              <span className="pill">{headerLinkedDatasetIds.length} linked</span>
+            </div>
+            <div className="stack modal-list">
+              {filteredDatasets.map((dataset) => (
+                <label key={dataset.id} className="checkbox-row modal-checkbox-row">
+                  <input type="checkbox" checked={headerLinkedDatasetIds.includes(dataset.id)} onChange={() => toggleDatasetSelection(dataset.id, headerLinkedDatasetIds, setHeaderLinkedDatasetIds)} />
+                  <span>{dataset.name}</span>
+                  <span className="muted">{dataset.id}</span>
+                </label>
+              ))}
+              {filteredDatasets.length === 0 ? <div className="muted">No datasets match your search.</div> : null}
+            </div>
+            <div className="row between wrap">
+              <button type="button" onClick={() => setHeaderLinkedDatasetIds([])}>Clear all</button>
+              <button type="button" onClick={() => void onApplyLinkedDatasets()} disabled={!selectedSession}>Apply linked datasets</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

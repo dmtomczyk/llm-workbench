@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 class ChatSessionCreate(BaseModel):
     title: str | None = None
-    provider_id: str
+    provider_id: str = ''
     model_name: str | None = None
     system_prompt: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)

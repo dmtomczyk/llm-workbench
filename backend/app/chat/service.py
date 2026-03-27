@@ -94,13 +94,13 @@ class ChatService:
         return [self._session_to_read(row) for row in rows]
 
     def create_session(self, payload: ChatSessionCreate) -> ChatSessionRead:
-        provider = self._provider_row(payload.provider_id)
-        title = (payload.title or '').strip() or f'Chat with {provider.name}'
+        provider = self.db.get(LLMProvider, payload.provider_id) if payload.provider_id else None
+        title = (payload.title or '').strip() or (f'Chat with {provider.name}' if provider else 'New chat')
         row = ChatSession(
             id=f'chat_{uuid4().hex}',
             title=title,
-            provider_id=provider.id,
-            model_name=payload.model_name or provider.default_model,
+            provider_id=provider.id if provider else '',
+            model_name=payload.model_name or (provider.default_model if provider else None),
             system_prompt=payload.system_prompt,
             metadata_json=json.dumps(payload.metadata or {}),
         )
@@ -126,10 +126,15 @@ class ChatService:
         row = self._session_row(session_id)
         before = self._session_to_read(row).model_dump()
         if payload.provider_id is not None:
-            provider = self._provider_row(payload.provider_id)
-            row.provider_id = provider.id
-            if payload.model_name is None and not row.model_name:
-                row.model_name = provider.default_model
+            if payload.provider_id:
+                provider = self._provider_row(payload.provider_id)
+                row.provider_id = provider.id
+                if payload.model_name is None and not row.model_name:
+                    row.model_name = provider.default_model
+            else:
+                row.provider_id = ''
+                if payload.model_name is None:
+                    row.model_name = None
         if payload.title is not None:
             row.title = payload.title.strip() or row.title
         if payload.model_name is not None:
@@ -415,6 +420,8 @@ class ChatService:
         messages = self.list_messages(session.id)
         if not messages and not session.system_prompt:
             raise HTTPException(status_code=400, detail='Chat session has no messages to complete')
+        if not session.provider_id:
+            raise HTTPException(status_code=400, detail='This chat has no provider configured yet. Open Settings and choose a provider before sending messages.')
         provider = self._provider_row(session.provider_id)
         selected_model = payload.model or session.model_name or provider.default_model
         provider_messages, context_info = self._build_provider_messages(
@@ -528,37 +535,55 @@ class ChatService:
     def _estimate_messages_tokens(self, messages: list[dict[str, str]]) -> int:
         return sum(self._estimate_text_tokens(message.get('content', '')) + 4 for message in messages)
 
-    def _grounding_system_message(self, session_metadata: dict) -> tuple[str | None, dict[str, str | bool | None]]:
+    def _grounding_system_message(self, session_metadata: dict) -> tuple[str | None, dict[str, object]]:
         grounding = session_metadata.get('grounding') if isinstance(session_metadata, dict) else None
         if not isinstance(grounding, dict):
-            return None, {'grounded': False, 'grounding_dataset_id': None}
-        dataset_id = grounding.get('dataset_id')
-        if not isinstance(dataset_id, str) or not dataset_id:
-            return None, {'grounded': False, 'grounding_dataset_id': None}
-        dataset = self.db.get(Dataset, dataset_id)
-        if dataset is None:
-            return None, {'grounded': False, 'grounding_dataset_id': dataset_id}
-        version = self.db.scalar(select(DatasetVersion).where(DatasetVersion.dataset_id == dataset.id).order_by(desc(DatasetVersion.version_no)).limit(1))
-        preview_text = 'No preview available.'
-        row_count = None
-        if version is not None:
-            row_count = version.row_count
-            try:
-                metadata = json.loads(version.metadata_json or '{}')
-                preview = metadata.get('preview')
-                if preview is not None:
-                    preview_text = json.dumps(preview, ensure_ascii=False)[:4000]
-            except Exception:
-                pass
+            return None, {'grounded': False, 'grounding_dataset_ids': []}
+
+        dataset_ids: list[str] = []
+        if isinstance(grounding.get('dataset_ids'), list):
+            dataset_ids = [item for item in grounding.get('dataset_ids') if isinstance(item, str) and item]
+        elif isinstance(grounding.get('dataset_id'), str) and grounding.get('dataset_id'):
+            dataset_ids = [grounding.get('dataset_id')]
+
+        if not dataset_ids:
+            return None, {'grounded': False, 'grounding_dataset_ids': []}
+
+        chunks: list[str] = []
+        resolved_ids: list[str] = []
+        for dataset_id in dataset_ids:
+            dataset = self.db.get(Dataset, dataset_id)
+            if dataset is None:
+                continue
+            version = self.db.scalar(select(DatasetVersion).where(DatasetVersion.dataset_id == dataset.id).order_by(desc(DatasetVersion.version_no)).limit(1))
+            preview_text = 'No preview available.'
+            row_count = None
+            if version is not None:
+                row_count = version.row_count
+                try:
+                    metadata = json.loads(version.metadata_json or '{}')
+                    preview = metadata.get('preview')
+                    if preview is not None:
+                        preview_text = json.dumps(preview, ensure_ascii=False)[:2500]
+                except Exception:
+                    pass
+            chunks.append(
+                f'Dataset ID: {dataset.id}\n'
+                f'Dataset Name: {dataset.name}\n'
+                f'Row Count: {row_count if row_count is not None else "unknown"}\n'
+                f'Dataset Preview: {preview_text}'
+            )
+            resolved_ids.append(dataset.id)
+
+        if not chunks:
+            return None, {'grounded': False, 'grounding_dataset_ids': dataset_ids}
+
         grounding_message = (
-            'Use the attached dataset context below as a primary grounding source for this chat. '
-            'Prefer answers supported by this dataset. If the answer is not present in the attached dataset, say that clearly.\n\n'
-            f'Dataset ID: {dataset.id}\n'
-            f'Dataset Name: {dataset.name}\n'
-            f'Row Count: {row_count if row_count is not None else "unknown"}\n'
-            f'Dataset Preview: {preview_text}'
+            'Use the linked dataset context below as a primary grounding source for this chat. '
+            'Prefer answers supported by these linked datasets. If the answer is not present in the linked datasets, say that clearly.\n\n'
+            + '\n\n---\n\n'.join(chunks)
         )
-        return grounding_message, {'grounded': True, 'grounding_dataset_id': dataset.id}
+        return grounding_message, {'grounded': True, 'grounding_dataset_ids': resolved_ids}
 
     def _provider_row(self, provider_id: str) -> LLMProvider:
         row = self.db.get(LLMProvider, provider_id)

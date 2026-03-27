@@ -7,8 +7,9 @@ import { ChatPage } from './features/chat/ChatPage';
 import { ConnectorsPage } from './features/connectors/ConnectorsPage';
 import { DashboardPage } from './features/dashboard/DashboardPage';
 import { PlaceholderPage } from './features/PlaceholderPage';
-import { ImportsPage } from './features/imports/ImportsPage';
+import { DatasetsPage } from './features/datasets/DatasetsPage';
 import { PluginsPage } from './features/plugins/PluginsPage';
+import { RecipesPage } from './features/recipes/RecipesPage';
 import { ProvidersPage } from './features/providers/ProvidersPage';
 import { SettingsPage } from './features/settings/SettingsPage';
 import { WorkbenchPage } from './features/workbench/WorkbenchPage';
@@ -21,7 +22,8 @@ export function App() {
         <Route path="/" element={<DashboardPage />} />
         <Route path="/chat" element={<ChatPage />} />
         <Route path="/workbench" element={<WorkbenchPage />} />
-        <Route path="/imports" element={<ImportsPage />} />
+        <Route path="/recipes" element={<RecipesPage />} />
+        <Route path="/datasets" element={<DatasetsPage />} />
         <Route path="/providers" element={<ProvidersPage />} />
         <Route path="/connectors" element={<ConnectorsPage />} />
         <Route path="/workflows" element={<WorkflowsPage />} />
