@@ -248,6 +248,7 @@ export function ChatPage() {
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const activeStreamAbortRef = useRef<AbortController | null>(null);
   const sessionMenuRef = useRef<HTMLDivElement | null>(null);
+  const sessionSettingsTitleRef = useRef<HTMLInputElement | null>(null);
 
   const selectedSession = useMemo(() => sessions.find((session) => session.id === selectedSessionId) ?? null, [sessions, selectedSessionId]);
   const menuSession = useMemo(() => sessions.find((session) => session.id === menuSessionId) ?? null, [sessions, menuSessionId]);
@@ -353,11 +354,7 @@ export function ChatPage() {
                           {showSessionMenuModal && menuSessionId === session.id ? (
                             <div className="session-popover-menu">
                               <button type="button" onClick={() => startRenamingSession(session)}>Rename</button>
-                              <button type="button" onClick={() => {
-                                setSelectedSessionId(session.id);
-                                setShowSessionSettings(true);
-                                setShowSessionMenuModal(false);
-                              }}>Open settings</button>
+                              <button type="button" onClick={() => openSessionSettings(session)}>Edit settings</button>
                               <button type="button" onClick={() => {
                                 setSelectedSessionId(session.id);
                                 setShowLinkDatasetModal(true);
@@ -467,6 +464,19 @@ export function ChatPage() {
     setHeaderLinkedDatasetIds(linkedDatasetIds(selectedSession?.metadata));
   }, [selectedSession]);
 
+  useEffect(() => {
+    if (!selectedSessionId) return;
+    if (sessions.some((session) => session.id === selectedSessionId)) return;
+    setSelectedSessionId('');
+    setShowSessionSettings(false);
+    setShowSessionMenuModal(false);
+    setMenuSessionId('');
+    setPendingDeleteSessionId('');
+    setMessages([]);
+    setStreamingReply('');
+    setLastContextInfo(null);
+  }, [sessions, selectedSessionId]);
+
   useEffect(() => { if (newProviderId) void ensureProviderModels(newProviderId); }, [newProviderId]);
   useEffect(() => { if (draftProviderId) void ensureProviderModels(draftProviderId); }, [draftProviderId]);
   useEffect(() => { if (transcriptRef.current) transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight; }, [messages, streamingReply]);
@@ -482,6 +492,16 @@ export function ChatPage() {
     document.addEventListener('mousedown', onPointerDown);
     return () => document.removeEventListener('mousedown', onPointerDown);
   }, [showSessionMenuModal]);
+
+  useEffect(() => {
+    if (!showSessionSettings) return;
+    window.setTimeout(() => sessionSettingsTitleRef.current?.focus(), 0);
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') setShowSessionSettings(false);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [showSessionSettings]);
 
   useEffect(() => {
     setSubnav(chatSubnav);
@@ -534,8 +554,8 @@ export function ChatPage() {
     }
   }
 
-  async function onSaveSession() {
-    if (!selectedSession) return;
+  async function onSaveSession(): Promise<boolean> {
+    if (!selectedSession) return false;
     setError('');
     try {
       const updated = await api<ChatSession>(`/api/chat/sessions/${selectedSession.id}`, {
@@ -550,9 +570,19 @@ export function ChatPage() {
       });
       setLastContextInfo(null);
       await loadProvidersAndSessions(updated.id);
+      return true;
     } catch (err) {
       setError(formatChatError(err));
+      return false;
     }
+  }
+
+  function openSessionSettings(sessionOverride?: ChatSession | null) {
+    const targetSession = sessionOverride ?? selectedSession;
+    if (!targetSession) return;
+    setSelectedSessionId(targetSession.id);
+    setShowSessionMenuModal(false);
+    setShowSessionSettings(true);
   }
 
   function startRenamingSession(session: ChatSession) {
@@ -922,7 +952,7 @@ export function ChatPage() {
             </div>
             <div className="row wrap">
               <button type="button" onClick={() => setShowLinkDatasetModal(true)} disabled={!selectedSession}>Link Dataset</button>
-              <button type="button" onClick={() => setShowSessionSettings((current) => !current)} disabled={!selectedSession}>{showSessionSettings ? 'Hide settings' : 'Settings'}</button>
+              <button type="button" onClick={() => openSessionSettings()} disabled={!selectedSession}>Settings</button>
               <button type="button" onClick={() => void regenerateLastResponse()} disabled={!selectedSession || sending}>Regenerate</button>
               <button type="button" onClick={() => exportTranscript('markdown')} disabled={!selectedSession}>Export .md</button>
               <button type="button" onClick={() => exportTranscript('txt')} disabled={!selectedSession}>Export .txt</button>
@@ -944,18 +974,29 @@ export function ChatPage() {
           </div>
 
           {selectedSession && showSessionSettings ? (
-            <div className="chat-header-grid">
-              <input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} placeholder="Session title" />
-              <select value={draftProviderId} onChange={(event) => setDraftProviderId(event.target.value)}>{providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</select>
-              <ModelPicker value={draftModelName} models={draftModels} onChange={setDraftModelName} selectId="draft-chat-model-select" inputId="draft-chat-model-input" inputPlaceholder="Custom model override" />
-              {providerModels[draftProviderId]?.fetchedAt ? <div className="muted">Models fetched {new Date(providerModels[draftProviderId].fetchedAt).toLocaleTimeString()}</div> : null}
-              {draftModelWarning ? <div className="muted">{draftModelWarning}</div> : null}
-              <textarea value={draftSystemPrompt} onChange={(event) => setDraftSystemPrompt(event.target.value)} rows={3} placeholder="System prompt" className="chat-system-prompt" />
-              <div className="row between wrap">
-                <label className="checkbox-row"><input type="checkbox" checked={streamEnabled} onChange={(event) => setStreamEnabled(event.target.checked)} /><span>Stream responses</span></label>
-                <button type="button" onClick={onSaveSession}>Save session settings</button>
+            <div className="modal-backdrop" onClick={() => setShowSessionSettings(false)}>
+              <div className="modal-card" onClick={(event) => event.stopPropagation()}>
+                <div className="row between wrap">
+                  <h2>Chat settings</h2>
+                  <button type="button" onClick={() => setShowSessionSettings(false)}>Close</button>
+                </div>
+                <div className="chat-header-grid">
+                  <input ref={sessionSettingsTitleRef} value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} placeholder="Session title" />
+                  <select value={draftProviderId} onChange={(event) => setDraftProviderId(event.target.value)}>{providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</select>
+                  <ModelPicker value={draftModelName} models={draftModels} onChange={setDraftModelName} selectId="draft-chat-model-select" inputId="draft-chat-model-input" inputPlaceholder="Custom model override" />
+                  {providerModels[draftProviderId]?.fetchedAt ? <div className="muted">Models fetched {new Date(providerModels[draftProviderId].fetchedAt).toLocaleTimeString()}</div> : null}
+                  {draftModelWarning ? <div className="muted">{draftModelWarning}</div> : null}
+                  <textarea value={draftSystemPrompt} onChange={(event) => setDraftSystemPrompt(event.target.value)} rows={4} placeholder="System prompt" className="chat-system-prompt" />
+                  <div className="muted">Configured model limits: context {effectiveModelSettings.contextWindow ?? 'not set'} · max output {effectiveModelSettings.maxOutputTokens ?? 'not set'}</div>
+                  <div className="row between wrap">
+                    <label className="checkbox-row"><input type="checkbox" checked={streamEnabled} onChange={(event) => setStreamEnabled(event.target.checked)} /><span>Stream responses</span></label>
+                    <div className="row wrap">
+                      <button type="button" onClick={() => setShowSessionSettings(false)}>Cancel</button>
+                      <button type="button" onClick={async () => { const ok = await onSaveSession(); if (ok) setShowSessionSettings(false); }}>Save changes</button>
+                    </div>
+                  </div>
+                </div>
               </div>
-              <div className="muted">Configured model limits: context {effectiveModelSettings.contextWindow ?? 'not set'} · max output {effectiveModelSettings.maxOutputTokens ?? 'not set'}</div>
             </div>
           ) : null}
         </div>
