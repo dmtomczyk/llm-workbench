@@ -381,8 +381,11 @@ export function WorkbenchPage() {
           )}
         </div>
 
-        <div className="card">
-          <h2>Output</h2>
+        <div className="card stack">
+          <div>
+            <h2>Output</h2>
+            <div className="muted">Use Workbench output to validate a prompt/provider combination first, then continue in chat or promote the pattern into workflows and automations.</div>
+          </div>
           {running ? (
             <div className="stack">
               <p><strong>Run in progress…</strong></p>
@@ -417,6 +420,11 @@ export function WorkbenchPage() {
               <div><strong>Run:</strong> {result.run_id}</div>
               <div><strong>Status:</strong> {result.provider_result.status}</div>
               <div><strong>Summary:</strong> {result.provider_result.summary}</div>
+              <div className="row wrap">
+                {selectedDatasetId ? <a className="button-link" href={`/chat?dataset_id=${encodeURIComponent(selectedDatasetId)}&provider_id=${encodeURIComponent(selectedProviderId)}&model=${encodeURIComponent(modelOverride || selectedProvider?.default_model || '')}`}>Continue in Chat</a> : null}
+                {selectedDatasetId ? <a className="button-link" href={`/workflows?dataset_id=${encodeURIComponent(selectedDatasetId)}&provider_id=${encodeURIComponent(selectedProviderId)}&template_id=${encodeURIComponent(selectedTemplateId)}`}>Promote to Workflow</a> : null}
+                {selectedDatasetId ? <a className="button-link" href={`/automations?target_type=template_prompt&dataset_id=${encodeURIComponent(selectedDatasetId)}&provider_id=${encodeURIComponent(selectedProviderId)}&template_id=${encodeURIComponent(selectedTemplateId)}`}>Seed Automation</a> : null}
+              </div>
               <details>
                 <summary>Rendered prompt</summary>
                 <pre>{result.rendered_prompt.user_prompt}</pre>

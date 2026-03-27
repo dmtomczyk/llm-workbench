@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom';
 
 import { useAuth } from '../auth';
 import { NAV_SECTIONS } from '../routes/nav';
+import { NavIcon } from './NavIcon';
 import { ShellSubnavContext } from './shellSubnav';
 
 export function Layout() {
@@ -33,7 +34,10 @@ export function Layout() {
                     end={item.path === '/'}
                     title={item.description ?? item.label}
                   >
-                    {item.label}
+                    <span className="nav-link-inner">
+                      <span className="nav-icon" aria-hidden="true"><NavIcon route={item.route} /></span>
+                      <span>{item.label}</span>
+                    </span>
                   </NavLink>
                 ))}
               </div>

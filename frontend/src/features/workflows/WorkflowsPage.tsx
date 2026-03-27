@@ -538,8 +538,11 @@ export function WorkflowsPage() {
           </details>
         </div>
 
-        <div className="card">
-          <h2>Run status</h2>
+        <div className="card stack">
+          <div>
+            <h2>Run status</h2>
+            <div className="muted">Use this area to inspect the latest reusable run, then branch into chat, workbench, or automations depending on what you want to do next.</div>
+          </div>
           {!runResult ? <p className="muted">Run a workflow to see outputs and recorded steps.</p> : (
             <div className="stack">
               <div><strong>Run:</strong> {runResult.run_id}</div>
@@ -548,6 +551,11 @@ export function WorkflowsPage() {
               <div className="pill-row">
                 <span className="pill">Workflow: {selectedWorkflow?.name ?? selectedWorkflowId}</span>
                 <span className="pill">Dataset: {datasets.find((dataset) => dataset.id === runDatasetId)?.name ?? (runDatasetId || 'none')}</span>
+              </div>
+              <div className="row wrap">
+                {runDatasetId ? <a className="button-link" href={`/chat?dataset_id=${encodeURIComponent(runDatasetId)}&provider_id=${encodeURIComponent(runProviderId)}&model=${encodeURIComponent(runModel || providers.find((provider) => provider.id === runProviderId)?.default_model || '')}`}>Open result in Chat</a> : null}
+                {runDatasetId ? <a className="button-link" href={`/workbench?dataset_id=${encodeURIComponent(runDatasetId)}&provider_id=${encodeURIComponent(runProviderId)}&template_id=${encodeURIComponent(runTemplateId)}&model=${encodeURIComponent(runModel)}`}>Inspect in Workbench</a> : null}
+                {selectedWorkflowId ? <a className="button-link" href={`/automations?target_type=workflow&workflow_id=${encodeURIComponent(selectedWorkflowId)}`}>Automate this workflow</a> : null}
               </div>
               {runStatus?.run.error_text ? <pre>{runStatus.run.error_text}</pre> : null}
               <details open>
