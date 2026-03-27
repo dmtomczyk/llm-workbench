@@ -231,6 +231,8 @@ export function ChatPage() {
   const selectedProvider = useMemo(() => providers.find((provider) => provider.id === (selectedSession?.provider_id ?? draftProviderId)) ?? null, [providers, selectedSession?.provider_id, draftProviderId]);
   const selectedLinkedDatasetIds = linkedDatasetIds(selectedSession?.metadata);
   const linkedDatasets = useMemo(() => datasets.filter((dataset) => selectedLinkedDatasetIds.includes(dataset.id)), [datasets, selectedLinkedDatasetIds]);
+  const requestedDatasetId = useMemo(() => new URLSearchParams(window.location.search).get('dataset_id') || '', []);
+  const requestedDataset = useMemo(() => datasets.find((dataset) => dataset.id === requestedDatasetId) ?? null, [datasets, requestedDatasetId]);
   const newChatModels = providerModels[newProviderId]?.models ?? [];
   const draftModels = providerModels[draftProviderId]?.models ?? [];
   const newChatModelWarning = modelWarning(newModelName, newChatModels);
@@ -321,7 +323,9 @@ export function ChatPage() {
     setDatasets(datasetData);
     setSessions(sessionData);
     setSelectedSessionId((current) => {
-      const preferred = preferredSessionId ?? current;
+      const search = new URLSearchParams(window.location.search);
+      const requestedSessionId = search.get('session_id') || '';
+      const preferred = preferredSessionId || requestedSessionId || current;
       if (preferred && sessionData.some((session) => session.id === preferred)) return preferred;
       return sessionData[0]?.id || '';
     });
@@ -342,7 +346,11 @@ export function ChatPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const datasetId = params.get('dataset_id') || '';
-    if (datasetId) setNewLinkedDatasetIds([datasetId]);
+    if (datasetId) {
+      setNewLinkedDatasetIds([datasetId]);
+      setHeaderLinkedDatasetIds([datasetId]);
+      setShowLinkDatasetModal(false);
+    }
   }, []);
 
   useEffect(() => { void loadMessages(selectedSessionId); }, [selectedSessionId]);
@@ -384,6 +392,26 @@ export function ChatPage() {
       setNewModelName('');
       setNewSystemPrompt('');
       setNewLinkedDatasetIds([]);
+      await loadProvidersAndSessions(created.id);
+      window.setTimeout(() => composerRef.current?.focus(), 0);
+    } catch (err) {
+      setError(formatChatError(err));
+    }
+  }
+
+  async function onCreateGroundedChat(datasetId: string) {
+    setError('');
+    setNewLinkedDatasetIds(datasetId ? [datasetId] : []);
+    try {
+      const created = await api<ChatSession>('/api/chat/sessions', {
+        method: 'POST',
+        body: JSON.stringify({
+          provider_id: newProviderId || '',
+          model_name: newModelName || undefined,
+          system_prompt: newSystemPrompt || undefined,
+          metadata: buildMetadata(datasetId ? [datasetId] : []),
+        }),
+      });
       await loadProvidersAndSessions(created.id);
       window.setTimeout(() => composerRef.current?.focus(), 0);
     } catch (err) {
@@ -768,6 +796,38 @@ export function ChatPage() {
         </div>
 
         <div className="chat-transcript" ref={transcriptRef}>
+          {!selectedSession ? (
+            <div className="card stack">
+              <div>
+                <h3>Start a grounded chat</h3>
+                <p className="muted">Chat is the main surface in BRIDGE. Start blank, start from a dataset, or jump back into a recent conversation.</p>
+              </div>
+              {requestedDataset ? (
+                <div className="notice">
+                  Ready to start from dataset <strong>{requestedDataset.name}</strong>.
+                  <div className="row wrap" style={{ marginTop: '0.75rem' }}>
+                    <button type="button" onClick={() => void onCreateGroundedChat(requestedDataset.id)}>Start chat with this dataset</button>
+                    <a className="button-link" href="/datasets">Browse all datasets</a>
+                  </div>
+                </div>
+              ) : null}
+              <div className="row wrap">
+                <button type="button" onClick={() => void onCreateSession()} disabled={!newProviderId}>Start blank chat</button>
+                {datasets[0] ? <button type="button" onClick={() => void onCreateGroundedChat(datasets[0].id)} disabled={!newProviderId}>Start grounded chat</button> : null}
+                <a className="button-link" href="/datasets">Choose a dataset first</a>
+              </div>
+              {sessions.length > 0 ? (
+                <div className="stack">
+                  <div className="muted">Recent chats</div>
+                  <div className="row wrap">
+                    {sessions.slice(0, 4).map((session) => (
+                      <button key={session.id} type="button" onClick={() => setSelectedSessionId(session.id)}>{session.title}</button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           {lastContextInfo ? (
             <div className={lastContextInfo.trimmed ? 'chat-context-banner warning' : 'chat-context-banner'}>
               <strong>Context budget</strong>
@@ -780,7 +840,8 @@ export function ChatPage() {
               </span>
             </div>
           ) : null}
-          {messages.length === 0 ? <p className="muted">No messages yet.</p> : messages.map((message) => {
+          {selectedSession && messages.length === 0 ? <p className="muted">No messages yet. Ask a question, or link a dataset to ground the conversation.</p> : null}
+          {messages.map((message) => {
             const interrupted = message.role === 'assistant' && message.metadata?.stream_interrupted;
             const regenerated = message.role === 'assistant' && message.metadata?.regenerated;
             const groundedIds = Array.isArray(message.metadata?.grounding_dataset_ids)
