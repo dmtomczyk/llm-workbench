@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.audit.schemas import AuditEventCreate
 from app.audit.service import AuditService
-from app.db.models import Dataset, ImportRecipe, ImportRun
+from app.db.models import Dataset, ImportRecipe, ImportRun, SettingsEntry
 from app.imports.fetchers import HttpImportFetcher
 from app.imports.schemas import (
     ImportRecipeCreate,
@@ -312,7 +312,7 @@ class ImportRecipeService:
             result = await self.http_fetcher.fetch(
                 url=str(source_config.get('url') or '').strip(),
                 method=str(source_config.get('method') or 'GET'),
-                headers=source_config.get('headers') or {},
+                headers=self._build_http_headers(source_config),
                 timeout_seconds=int(source_config.get('timeout_seconds') or 15),
                 body=source_config.get('body') or None,
             )
@@ -353,6 +353,18 @@ class ImportRecipeService:
             headers = source_config.get('headers') or {}
             if not isinstance(headers, dict):
                 raise HTTPException(status_code=400, detail='source_config.headers must be an object')
+            auth = source_config.get('auth') or {'mode': 'none'}
+            if not isinstance(auth, dict):
+                raise HTTPException(status_code=400, detail='source_config.auth must be an object')
+            auth_mode = str(auth.get('mode') or 'none')
+            if auth_mode not in {'none', 'bearer', 'custom_header', 'basic'}:
+                raise HTTPException(status_code=400, detail='source_config.auth.mode must be none, bearer, custom_header, or basic')
+            if auth_mode in {'bearer', 'custom_header', 'basic'} and not str(auth.get('secret_alias') or '').strip():
+                raise HTTPException(status_code=400, detail='source_config.auth.secret_alias is required for authenticated HTTP recipes')
+            if auth_mode == 'custom_header' and not str(auth.get('header_name') or '').strip():
+                raise HTTPException(status_code=400, detail='source_config.auth.header_name is required for custom_header auth')
+            if auth_mode == 'basic' and not str(auth.get('username') or '').strip():
+                raise HTTPException(status_code=400, detail='source_config.auth.username is required for basic auth')
             try:
                 timeout = int(source_config.get('timeout_seconds') or 15)
             except Exception as exc:
@@ -362,6 +374,44 @@ class ImportRecipeService:
             hint = str(source_config.get('response_format_hint') or 'auto')
             if hint not in {'auto', 'json', 'csv', 'text'}:
                 raise HTTPException(status_code=400, detail='source_config.response_format_hint must be auto, json, csv, or text')
+
+    @staticmethod
+    def _secret_setting_key(secret_alias: str) -> str:
+        return f'secrets.{secret_alias}'
+
+    def _resolve_secret_value(self, secret_alias: str | None) -> str | None:
+        if not secret_alias:
+            return None
+        row = self.db.get(SettingsEntry, self._secret_setting_key(secret_alias))
+        if row is not None:
+            try:
+                value = json.loads(row.value_json)
+                if isinstance(value, str) and value:
+                    return value
+            except Exception:
+                pass
+        return None
+
+    def _build_http_headers(self, source_config: dict) -> dict[str, str]:
+        headers = {str(k): str(v) for k, v in (source_config.get('headers') or {}).items()}
+        auth = source_config.get('auth') or {'mode': 'none'}
+        mode = str(auth.get('mode') or 'none')
+        if mode == 'none':
+            return headers
+        secret_alias = str(auth.get('secret_alias') or '').strip()
+        secret_value = self._resolve_secret_value(secret_alias)
+        if not secret_value:
+            raise HTTPException(status_code=400, detail={'message': f'No saved secret found for alias {secret_alias}', 'type': 'auth_error'})
+        if mode == 'bearer':
+            headers['Authorization'] = f'Bearer {secret_value}'
+        elif mode == 'custom_header':
+            headers[str(auth.get('header_name') or 'X-API-Key')] = secret_value
+        elif mode == 'basic':
+            import base64
+            username = str(auth.get('username') or '')
+            token = base64.b64encode(f'{username}:{secret_value}'.encode('utf-8')).decode('ascii')
+            headers['Authorization'] = f'Basic {token}'
+        return headers
 
     def _recipe_to_dict(self, row: ImportRecipe) -> dict:
         dataset_name = None

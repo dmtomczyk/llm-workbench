@@ -69,7 +69,16 @@ button { cursor: pointer; }
 .between { justify-content: space-between; }
 .muted { color: #8b949e; }
 .table { width: 100%; border-collapse: collapse; }
-.table th, .table td { text-align: left; padding: 0.7rem; border-bottom: 1px solid #21262d; }
+.table th, .table td { text-align: left; padding: 0.7rem; border-bottom: 1px solid #21262d; vertical-align: top; }
+.table-wrap {
+  overflow: auto;
+  border: 1px solid #21262d;
+  border-radius: 0.75rem;
+}
+.compact-table th, .compact-table td {
+  padding: 0.55rem 0.65rem;
+  white-space: nowrap;
+}
 .chat-layout { grid-template-columns: 340px 1fr; }
 .chat-page {
   min-height: calc(100vh - 120px);

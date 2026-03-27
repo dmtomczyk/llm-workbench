@@ -12,6 +12,8 @@ type SourceType = 'file_upload' | 'http';
 type TargetMode = 'create_new_dataset' | 'append_to_dataset';
 type ResponseFormatHint = 'auto' | 'json' | 'csv' | 'text';
 
+type HttpAuthMode = 'none' | 'bearer' | 'custom_header' | 'basic';
+
 type ImportRecipe = {
   id: string;
   name: string;
@@ -25,6 +27,12 @@ type ImportRecipe = {
     timeout_seconds?: number;
     response_format_hint?: ResponseFormatHint;
     body?: string | null;
+    auth?: {
+      mode?: HttpAuthMode;
+      secret_alias?: string;
+      header_name?: string;
+      username?: string;
+    };
   };
   target_mode: TargetMode;
   target_dataset_id?: string | null;
@@ -82,6 +90,10 @@ type RecipeForm = {
   http_timeout_seconds: string;
   http_response_format_hint: ResponseFormatHint;
   http_body: string;
+  http_auth_mode: HttpAuthMode;
+  http_auth_secret_alias: string;
+  http_auth_header_name: string;
+  http_auth_username: string;
   rename_fields_text: string;
   drop_fields_text: string;
   keep_fields_text: string;
@@ -102,6 +114,10 @@ const EMPTY_FORM: RecipeForm = {
   http_timeout_seconds: '15',
   http_response_format_hint: 'auto',
   http_body: '',
+  http_auth_mode: 'none',
+  http_auth_secret_alias: '',
+  http_auth_header_name: 'X-API-Key',
+  http_auth_username: '',
   rename_fields_text: '',
   drop_fields_text: '',
   keep_fields_text: '',
@@ -123,6 +139,10 @@ function recipeToForm(recipe: ImportRecipe): RecipeForm {
     http_timeout_seconds: String(recipe.source_config?.timeout_seconds ?? 15),
     http_response_format_hint: recipe.source_config?.response_format_hint ?? 'auto',
     http_body: recipe.source_config?.body ?? '',
+    http_auth_mode: recipe.source_config?.auth?.mode ?? 'none',
+    http_auth_secret_alias: recipe.source_config?.auth?.secret_alias ?? '',
+    http_auth_header_name: recipe.source_config?.auth?.header_name ?? 'X-API-Key',
+    http_auth_username: recipe.source_config?.auth?.username ?? '',
     rename_fields_text: Object.entries((recipe.transform_rules?.rename_fields as Record<string, string> | undefined) ?? {}).map(([from, to]) => `${from}=${to}`).join('\n'),
     drop_fields_text: ((recipe.transform_rules?.drop_fields as string[] | undefined) ?? []).join(', '),
     keep_fields_text: ((recipe.transform_rules?.keep_fields as string[] | undefined) ?? []).join(', '),
@@ -139,6 +159,32 @@ function prettyJson(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function isRecordArray(value: unknown): value is Record<string, unknown>[] {
+  return Array.isArray(value) && value.every((item) => item && typeof item === 'object' && !Array.isArray(item));
+}
+
+function renderRecordTable(items: Record<string, unknown>[]) {
+  const columns = Array.from(new Set(items.flatMap((item) => Object.keys(item))));
+  return (
+    <div className="table-wrap">
+      <table className="table compact-table">
+        <thead>
+          <tr>
+            {columns.map((column) => <th key={column}>{column}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item, index) => (
+            <tr key={index}>
+              {columns.map((column) => <td key={column}>{String(item[column] ?? '')}</td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 function summarizeRun(run: ImportRun): string {
@@ -180,6 +226,12 @@ function buildSourceConfig(form: RecipeForm): Record<string, unknown> {
     timeout_seconds: Number(form.http_timeout_seconds || '15'),
     response_format_hint: form.http_response_format_hint,
     body: form.http_body.trim() || null,
+    auth: {
+      mode: form.http_auth_mode,
+      secret_alias: form.http_auth_secret_alias.trim() || null,
+      header_name: form.http_auth_mode === 'custom_header' ? (form.http_auth_header_name.trim() || 'X-API-Key') : null,
+      username: form.http_auth_mode === 'basic' ? (form.http_auth_username.trim() || null) : null,
+    },
   };
 }
 
@@ -463,7 +515,7 @@ export function ImportsPage() {
                   <option value="POST">POST</option>
                 </select>
                 <input value={form.http_url} onChange={(event) => setForm((current) => ({ ...current, http_url: event.target.value }))} placeholder="http://internal.service.local/export.json" required />
-                <textarea value={form.http_headers_text} onChange={(event) => setForm((current) => ({ ...current, http_headers_text: event.target.value }))} rows={5} placeholder='{"X-Api-Key":"..."}' />
+                <textarea value={form.http_headers_text} onChange={(event) => setForm((current) => ({ ...current, http_headers_text: event.target.value }))} rows={5} placeholder='{"Accept":"application/json"}' />
                 <div className="grid two-col">
                   <input value={form.http_timeout_seconds} onChange={(event) => setForm((current) => ({ ...current, http_timeout_seconds: event.target.value }))} placeholder="Timeout seconds" inputMode="numeric" />
                   <select value={form.http_response_format_hint} onChange={(event) => setForm((current) => ({ ...current, http_response_format_hint: event.target.value as ResponseFormatHint }))}>
@@ -472,6 +524,19 @@ export function ImportsPage() {
                     <option value="csv">CSV</option>
                     <option value="text">Text</option>
                   </select>
+                </div>
+                <div className="card stack">
+                  <h3>HTTP auth</h3>
+                  <select value={form.http_auth_mode} onChange={(event) => setForm((current) => ({ ...current, http_auth_mode: event.target.value as HttpAuthMode }))}>
+                    <option value="none">No auth</option>
+                    <option value="bearer">Bearer token</option>
+                    <option value="custom_header">Custom header secret</option>
+                    <option value="basic">Basic auth</option>
+                  </select>
+                  {form.http_auth_mode !== 'none' ? <input value={form.http_auth_secret_alias} onChange={(event) => setForm((current) => ({ ...current, http_auth_secret_alias: event.target.value }))} placeholder="Saved secret alias" /> : null}
+                  {form.http_auth_mode === 'custom_header' ? <input value={form.http_auth_header_name} onChange={(event) => setForm((current) => ({ ...current, http_auth_header_name: event.target.value }))} placeholder="Header name" /> : null}
+                  {form.http_auth_mode === 'basic' ? <input value={form.http_auth_username} onChange={(event) => setForm((current) => ({ ...current, http_auth_username: event.target.value }))} placeholder="Basic auth username" /> : null}
+                  <div className="muted">Secrets are resolved at runtime from saved aliases like <code>secrets.MY_ALIAS</code>. Secret values are not stored in the recipe.</div>
                 </div>
                 <textarea value={form.http_body} onChange={(event) => setForm((current) => ({ ...current, http_body: event.target.value }))} rows={4} placeholder="Optional raw request body for POST recipes" />
               </>
@@ -515,15 +580,31 @@ export function ImportsPage() {
               <h2>Preview</h2>
               <span className="muted">{preview.parser_used} · {preview.media_type ?? 'unknown media type'}</span>
             </div>
-            <div className="muted">Rows: {preview.row_count ?? 'unknown'}</div>
+            <div className="pill-row">
+              <span className="pill">Rows: {preview.row_count ?? 'unknown'}</span>
+              <span className="pill">Source: {preview.source_type}</span>
+            </div>
             {preview.warnings.length > 0 ? <div className="notice error"><pre>{preview.warnings.join('\n')}</pre></div> : null}
-            <details open>
+            {isRecordArray(preview.preview.sample_items) ? (
+              <div className="stack">
+                <div className="muted">Sample rows</div>
+                {renderRecordTable(preview.preview.sample_items)}
+                {preview.preview.transform_summary ? (
+                  <details>
+                    <summary>Transform summary</summary>
+                    <pre>{prettyJson(preview.preview.transform_summary)}</pre>
+                  </details>
+                ) : null}
+              </div>
+            ) : (
+              <details open>
+                <summary>Preview payload</summary>
+                <pre>{prettyJson(preview.preview)}</pre>
+              </details>
+            )}
+            <details>
               <summary>Diagnostics</summary>
               <pre>{prettyJson(preview.diagnostics)}</pre>
-            </details>
-            <details open>
-              <summary>Preview payload</summary>
-              <pre>{prettyJson(preview.preview)}</pre>
             </details>
           </div>
         ) : null}
@@ -568,8 +649,24 @@ export function ImportsPage() {
                     <div><strong>Warnings:</strong> {runDetail.warning_count}</div>
                     {runDetail.dataset_id ? <div><strong>Dataset:</strong> {datasetNameById[runDetail.dataset_id] ?? runDetail.dataset_id} <span className="muted">({runDetail.dataset_id})</span></div> : null}
                     {runDetail.dataset_version_id ? <div><strong>Dataset version:</strong> {runDetail.dataset_version_id}</div> : null}
-                    {runDetail.error_text ? <pre>{runDetail.error_text}</pre> : null}
-                    <details open>
+                    {runDetail.error_text ? <div className="notice error"><pre>{runDetail.error_text}</pre></div> : null}
+                    {isRecordArray(runDetail.details.preview && (runDetail.details.preview as Record<string, unknown>).sample_items) ? (
+                      <div className="stack">
+                        <div className="muted">Sample rows</div>
+                        {renderRecordTable((runDetail.details.preview as Record<string, unknown>).sample_items as Record<string, unknown>[])}
+                      </div>
+                    ) : null}
+                    {runDetail.details.preview && (runDetail.details.preview as Record<string, unknown>).transform_summary ? (
+                      <details>
+                        <summary>Transform summary</summary>
+                        <pre>{prettyJson((runDetail.details.preview as Record<string, unknown>).transform_summary)}</pre>
+                      </details>
+                    ) : null}
+                    <details>
+                      <summary>Diagnostics</summary>
+                      <pre>{prettyJson(runDetail.details.diagnostics ?? {})}</pre>
+                    </details>
+                    <details>
                       <summary>Details</summary>
                       <pre>{prettyJson(runDetail.details)}</pre>
                     </details>

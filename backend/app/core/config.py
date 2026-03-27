@@ -70,6 +70,8 @@ class ImportsSettings(BaseModel):
     allowed_extensions: list[str] = Field(
         default_factory=lambda: ["csv", "xlsx", "json", "txt", "md", "docx", "pdf", "eml", "msg"]
     )
+    http_tls_verify: bool = True
+    http_ca_bundle: str | None = None
 
 
 class ExportsSettings(BaseModel):

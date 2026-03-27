@@ -5,12 +5,21 @@ from time import perf_counter
 import httpx
 from fastapi import HTTPException
 
+from app.core.config import get_settings
+
 
 class HttpImportFetcher:
+    def __init__(self) -> None:
+        self.settings = get_settings()
+
     async def fetch(self, *, url: str, method: str = 'GET', headers: dict | None = None, timeout_seconds: int = 15, body: str | None = None) -> dict:
+        verify: bool | str = self.settings.imports.http_tls_verify
+        if self.settings.imports.http_tls_verify and self.settings.imports.http_ca_bundle:
+            verify = str(self.settings.resolve_path(self.settings.imports.http_ca_bundle))
+
         started = perf_counter()
         try:
-            async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True) as client:
+            async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True, verify=verify) as client:
                 response = await client.request(method.upper(), url, headers=headers or {}, content=body.encode('utf-8') if body else None)
             elapsed_ms = int((perf_counter() - started) * 1000)
         except httpx.ConnectTimeout as exc:
@@ -30,6 +39,8 @@ class HttpImportFetcher:
             'status_code': response.status_code,
             'content_type': response.headers.get('content-type'),
             'elapsed_ms': elapsed_ms,
+            'tls_verify': bool(self.settings.imports.http_tls_verify),
+            'ca_bundle_configured': bool(self.settings.imports.http_ca_bundle),
         }
         if response.status_code >= 400:
             raise HTTPException(status_code=502, detail={'message': f'HTTP {response.status_code} from {url}', 'type': 'http_status_error', 'diagnostics': diagnostics})
