@@ -147,6 +147,47 @@ class ImportRecord(Base):
     created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("CURRENT_TIMESTAMP"))
 
 
+class ImportRecipe(Base, TimestampTextMixin):
+    __tablename__ = "import_recipe"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    enabled: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    source_type: Mapped[str] = mapped_column(Text, nullable=False)
+    target_mode: Mapped[str] = mapped_column(Text, nullable=False)
+    target_dataset_id: Mapped[str | None] = mapped_column(Text)
+    dataset_name_template: Mapped[str | None] = mapped_column(Text)
+    parser_options_json: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'{}'"))
+    transform_rules_json: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'{}'"))
+    preview_config_json: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'{}'"))
+    last_run_at: Mapped[str | None] = mapped_column(Text)
+    last_run_status: Mapped[str | None] = mapped_column(Text)
+
+
+class ImportRun(Base):
+    __tablename__ = "import_run"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    recipe_id: Mapped[str] = mapped_column(Text, nullable=False)
+    dataset_id: Mapped[str | None] = mapped_column(Text)
+    dataset_version_id: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'created'"))
+    source_type: Mapped[str] = mapped_column(Text, nullable=False)
+    original_filename: Mapped[str | None] = mapped_column(Text)
+    storage_path: Mapped[str | None] = mapped_column(Text)
+    parser_used: Mapped[str | None] = mapped_column(Text)
+    media_type: Mapped[str | None] = mapped_column(Text)
+    byte_size: Mapped[int | None] = mapped_column(Integer)
+    checksum: Mapped[str | None] = mapped_column(Text)
+    warning_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    error_text: Mapped[str | None] = mapped_column(Text)
+    details_json: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'{}'"))
+    started_at: Mapped[str | None] = mapped_column(Text)
+    finished_at: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("CURRENT_TIMESTAMP"))
+
+
 class Workflow(Base, TimestampTextMixin):
     __tablename__ = "workflow"
 

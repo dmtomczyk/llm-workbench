@@ -14,7 +14,7 @@ from app.audit.schemas import AuditEventCreate
 from app.audit.service import AuditService
 from app.core.config import get_settings
 from app.db.models import Dataset, DatasetVersion, ImportRecord
-from app.imports.parsers import FileParser
+from app.imports.parsers import FileParser, ParsedContent
 
 
 class ImportService:
@@ -25,62 +25,114 @@ class ImportService:
         self.parser = FileParser()
 
     async def create_import(self, upload: UploadFile, dataset_name: str | None = None) -> dict:
+        storage = await self.persist_upload(upload, prefix=f'imp_{uuid4().hex}')
+        dataset_id = f'ds_{uuid4().hex}'
+        dataset = self.create_dataset(
+            dataset_id=dataset_id,
+            name=dataset_name or Path(storage['safe_name']).stem,
+            source_type='upload',
+            source_ref=storage['safe_name'],
+            media_type=storage['media_type'],
+            metadata={'original_filename': storage['safe_name']},
+        )
+        parsed = self.parse_stored_file(storage['storage_path'], media_type=storage['media_type'])
+        version = self.create_dataset_version(
+            dataset=dataset,
+            parsed=parsed,
+            storage_path=storage['storage_path'],
+            checksum=storage['checksum'],
+        )
+        import_record = ImportRecord(
+            id=storage['storage_id'],
+            dataset_id=dataset.id,
+            import_type='upload',
+            original_filename=storage['safe_name'],
+            storage_path=str(storage['storage_path']),
+            parser_used=parsed.parser_used,
+            media_type=storage['media_type'],
+            byte_size=storage['byte_size'],
+            checksum=storage['checksum'],
+            status='normalized',
+            details_json=json.dumps({'preview': parsed.preview, 'warnings': parsed.warnings or []}),
+        )
+        self.db.add_all([dataset, version, import_record])
+        self.db.commit()
+        self.audit.record(AuditEventCreate(action='import.created', entity_type='import', entity_id=import_record.id, after={'dataset_id': dataset.id, 'filename': storage['safe_name'], 'parser': parsed.parser_used}))
+        self.audit.record(AuditEventCreate(action='dataset.normalized', entity_type='dataset', entity_id=dataset.id, after={'dataset_version_id': version.id, 'type': parsed.normalized_payload['type']}))
+        return self.get_import(import_record.id)
+
+    async def persist_upload(self, upload: UploadFile, prefix: str) -> dict:
         if not upload.filename:
             raise HTTPException(status_code=400, detail='filename is required')
-        extension = Path(upload.filename).suffix.lower().lstrip('.')
+        safe_name = Path(upload.filename).name
+        extension = Path(safe_name).suffix.lower().lstrip('.')
         if extension not in self.settings.imports.allowed_extensions:
             raise HTTPException(status_code=400, detail=f'extension .{extension} is not allowed')
 
-        import_id = f'imp_{uuid4().hex}'
-        dataset_id = f'ds_{uuid4().hex}'
-        version_id = f'dsv_{uuid4().hex}'
-        safe_name = Path(upload.filename).name
         raw_bytes = await upload.read()
         checksum = hashlib.sha256(raw_bytes).hexdigest()
-        storage_path = self.settings.resolve_path(self.settings.storage.imports_dir) / f'{import_id}_{safe_name}'
+        storage_path = self.settings.resolve_path(self.settings.storage.imports_dir) / f'{prefix}_{safe_name}'
         storage_path.write_bytes(raw_bytes)
         media_type = upload.content_type or mimetypes.guess_type(safe_name)[0] or 'application/octet-stream'
+        return {
+            'storage_id': prefix,
+            'safe_name': safe_name,
+            'storage_path': storage_path,
+            'media_type': media_type,
+            'byte_size': len(raw_bytes),
+            'checksum': checksum,
+        }
 
-        dataset = Dataset(
+    def parse_stored_file(self, storage_path: Path, media_type: str | None = None) -> ParsedContent:
+        return self.parser.parse(storage_path, media_type=media_type)
+
+    def create_dataset(
+        self,
+        *,
+        dataset_id: str,
+        name: str,
+        source_type: str,
+        source_ref: str | None,
+        media_type: str | None,
+        metadata: dict,
+    ) -> Dataset:
+        return Dataset(
             id=dataset_id,
-            name=dataset_name or Path(safe_name).stem,
-            source_type='upload',
-            source_ref=safe_name,
+            name=name,
+            source_type=source_type,
+            source_ref=source_ref,
             media_type=media_type,
-            latest_version_no=1,
-            metadata_json=json.dumps({'original_filename': safe_name}),
+            latest_version_no=0,
+            metadata_json=json.dumps(metadata),
         )
-        parsed = self.parser.parse(storage_path, media_type=media_type)
-        normalized_path = self.settings.resolve_path(self.settings.storage.artifacts_dir) / f'{version_id}_normalized.json'
-        normalized_path.write_text(json.dumps(parsed.normalized_payload, indent=2, ensure_ascii=False), encoding='utf-8')
-        version = DatasetVersion(
+
+    def create_dataset_version(
+        self,
+        *,
+        dataset: Dataset,
+        parsed: ParsedContent,
+        storage_path: Path,
+        checksum: str,
+    ) -> DatasetVersion:
+        next_version_no = int(dataset.latest_version_no or 0) + 1
+        version_id = f'dsv_{uuid4().hex}'
+        normalized_path = self.write_normalized_artifact(version_id, parsed.normalized_payload)
+        dataset.latest_version_no = next_version_no
+        return DatasetVersion(
             id=version_id,
-            dataset_id=dataset_id,
-            version_no=1,
+            dataset_id=dataset.id,
+            version_no=next_version_no,
             storage_path=str(storage_path),
             normalized_payload_path=str(normalized_path),
             checksum=checksum,
             row_count=parsed.row_count,
             metadata_json=json.dumps({'preview': parsed.preview, 'warnings': parsed.warnings or []}),
         )
-        import_record = ImportRecord(
-            id=import_id,
-            dataset_id=dataset_id,
-            import_type='upload',
-            original_filename=safe_name,
-            storage_path=str(storage_path),
-            parser_used=parsed.parser_used,
-            media_type=media_type,
-            byte_size=len(raw_bytes),
-            checksum=checksum,
-            status='normalized',
-            details_json=json.dumps({'preview': parsed.preview, 'warnings': parsed.warnings or []}),
-        )
-        self.db.add_all([dataset, version, import_record])
-        self.db.commit()
-        self.audit.record(AuditEventCreate(action='import.created', entity_type='import', entity_id=import_id, after={'dataset_id': dataset_id, 'filename': safe_name, 'parser': parsed.parser_used}))
-        self.audit.record(AuditEventCreate(action='dataset.normalized', entity_type='dataset', entity_id=dataset_id, after={'dataset_version_id': version_id, 'type': parsed.normalized_payload['type']}))
-        return self.get_import(import_id)
+
+    def write_normalized_artifact(self, version_id: str, normalized_payload: dict) -> Path:
+        normalized_path = self.settings.resolve_path(self.settings.storage.artifacts_dir) / f'{version_id}_normalized.json'
+        normalized_path.write_text(json.dumps(normalized_payload, indent=2, ensure_ascii=False), encoding='utf-8')
+        return normalized_path
 
     def list_imports(self) -> list[dict]:
         rows = self.db.scalars(select(ImportRecord).order_by(desc(ImportRecord.created_at))).all()

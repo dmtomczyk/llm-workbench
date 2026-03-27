@@ -15,6 +15,52 @@ log() {
   printf '\n==> %s\n' "$1"
 }
 
+run_backend_migrations() {
+  local py="$VENV_DIR/bin/python"
+  local mode
+  mode="$(cd "$BACKEND_DIR" && "$py" - <<'PY'
+from app.core.config import get_settings
+import sqlite3
+from pathlib import Path
+
+settings = get_settings()
+url = settings.database_url_resolved
+if not url.startswith('sqlite:///'):
+    print('upgrade')
+    raise SystemExit
+
+path = Path(url.removeprefix('sqlite:///'))
+if not path.exists():
+    print('upgrade')
+    raise SystemExit
+
+conn = sqlite3.connect(path)
+cur = conn.cursor()
+cur.execute("select name from sqlite_master where type='table'")
+tables = {row[0] for row in cur.fetchall()}
+if 'alembic_version' not in tables:
+    print('upgrade')
+    conn.close()
+    raise SystemExit
+cur.execute('select version_num from alembic_version')
+rows = cur.fetchall()
+non_alembic_tables = tables - {'alembic_version'}
+if not rows and non_alembic_tables:
+    print('stamp')
+else:
+    print('upgrade')
+conn.close()
+PY
+)"
+
+  if [[ "$mode" == "stamp" ]]; then
+    log "Detected existing SQLite schema with empty alembic_version; stamping current DB to head"
+    (cd "$BACKEND_DIR" && "$py" -m alembic stamp head)
+  else
+    (cd "$BACKEND_DIR" && "$py" -m alembic upgrade head)
+  fi
+}
+
 cleanup() {
   set +e
   if [[ -n "$BACKEND_PID" ]] && kill -0 "$BACKEND_PID" >/dev/null 2>&1; then
@@ -43,14 +89,12 @@ if [[ ! -d "$FRONTEND_DIR/node_modules" ]]; then
 fi
 
 log "Applying backend migrations"
+run_backend_migrations
 cd "$BACKEND_DIR"
-source "$VENV_DIR/bin/activate"
-alembic upgrade head
 
 log "Starting backend on http://localhost:$BACKEND_PORT"
-uvicorn app.main:app --reload --host "$BACKEND_HOST" --port "$BACKEND_PORT" &
+"$VENV_DIR/bin/python" -m uvicorn app.main:app --reload --host "$BACKEND_HOST" --port "$BACKEND_PORT" &
 BACKEND_PID=$!
-deactivate
 
 log "Starting frontend on http://localhost:$FRONTEND_PORT"
 cd "$FRONTEND_DIR"

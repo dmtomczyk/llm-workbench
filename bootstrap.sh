@@ -86,31 +86,26 @@ if [[ "$SKIP_BACKEND" -eq 0 ]]; then
     }
   fi
 
-  # shellcheck source=/dev/null
-  source "$VENV_DIR/bin/activate"
-
   log "Upgrading pip"
-  python -m pip install --upgrade pip
+  "$VENV_DIR/bin/python" -m pip install --upgrade pip
 
   log "Installing backend dependencies"
   if [[ "$WITH_DEV" -eq 1 ]]; then
-    python -m pip install -e "$BACKEND_DIR"[dev]
+    "$VENV_DIR/bin/python" -m pip install -e "$BACKEND_DIR"[dev]
   else
-    python -m pip install -e "$BACKEND_DIR"
+    "$VENV_DIR/bin/python" -m pip install -e "$BACKEND_DIR"
   fi
 
   if [[ "$WITH_PARSERS" -eq 1 ]]; then
     log "Installing optional parser dependencies"
-    python -m pip install pandas openpyxl python-docx pypdf extract-msg
+    "$VENV_DIR/bin/python" -m pip install pandas openpyxl python-docx pypdf extract-msg
   fi
 
   log "Backend dependency check"
-  python - <<'PY'
+  "$VENV_DIR/bin/python" - <<'PY'
 import fastapi, sqlalchemy, yaml, httpx, jinja2, jsonschema
 print('backend deps ok')
 PY
-
-  deactivate
 fi
 
 if [[ "$SKIP_FRONTEND" -eq 0 ]]; then
@@ -137,8 +132,8 @@ Next steps:
   Backend:
     cd "$BACKEND_DIR"
     source .venv/bin/activate
-    alembic upgrade head
-    uvicorn app.main:app --reload --host 0.0.0.0 --port 8080
+    python -m alembic upgrade head
+    python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8080
 
   Frontend:
     cd "$FRONTEND_DIR"
