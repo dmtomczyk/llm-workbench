@@ -322,6 +322,7 @@ export function WorkbenchPage() {
         <div className="card">
           <h2>Current run setup</h2>
           <div className="row wrap">
+            {selectedDatasetId ? <a className="button-link" href={`/chat?dataset_id=${encodeURIComponent(selectedDatasetId)}&provider_id=${encodeURIComponent(selectedProviderId)}&model=${encodeURIComponent(modelOverride || selectedProvider?.default_model || '')}`}>Open in Chat</a> : null}
             {selectedDatasetId ? <a className="button-link" href={`/workflows?dataset_id=${encodeURIComponent(selectedDatasetId)}&provider_id=${encodeURIComponent(selectedProviderId)}&template_id=${encodeURIComponent(selectedTemplateId)}`}>Open in Workflows</a> : null}
             {selectedDatasetId ? <a className="button-link" href={`/automations?target_type=template_prompt&dataset_id=${encodeURIComponent(selectedDatasetId)}&provider_id=${encodeURIComponent(selectedProviderId)}&template_id=${encodeURIComponent(selectedTemplateId)}`}>Seed Automation</a> : null}
           </div>

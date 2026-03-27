@@ -489,6 +489,7 @@ export function WorkflowsPage() {
           <p className="muted">V1 supports `prompt_template` and `llm_provider` steps. You can hardcode IDs inside the definition or supply overrides here.</p>
           <div className="row wrap">
             {selectedWorkflowId ? <a className="button-link" href={`/automations?target_type=workflow&workflow_id=${encodeURIComponent(selectedWorkflowId)}`}>Turn into automation</a> : null}
+            {runDatasetId ? <a className="button-link" href={`/chat?dataset_id=${encodeURIComponent(runDatasetId)}&provider_id=${encodeURIComponent(runProviderId)}&model=${encodeURIComponent(runModel || providers.find((provider) => provider.id === runProviderId)?.default_model || '')}`}>Open in Chat</a> : null}
             {runDatasetId ? <a className="button-link" href={`/workbench?dataset_id=${encodeURIComponent(runDatasetId)}&provider_id=${encodeURIComponent(runProviderId)}&template_id=${encodeURIComponent(runTemplateId)}&model=${encodeURIComponent(runModel)}`}>Open in Workbench</a> : null}
           </div>
           <div className="pill-row">

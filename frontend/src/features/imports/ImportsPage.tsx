@@ -690,6 +690,7 @@ export function ImportsPage() {
                     {runDetail.dataset_version_id ? <div><strong>Dataset version:</strong> {runDetail.dataset_version_id}</div> : null}
                     {runDetail.dataset_id ? (
                       <div className="row wrap">
+                        <a className="button-link" href={`/chat?dataset_id=${encodeURIComponent(runDetail.dataset_id)}`}>Open in Chat</a>
                         <a className="button-link" href={buildWorkbenchUrl({ datasetId: runDetail.dataset_id })}>Open in Workbench</a>
                         <a className="button-link" href={buildWorkflowsUrl({ datasetId: runDetail.dataset_id })}>Use in Workflows</a>
                         <a className="button-link" href={buildAutomationsUrl({ targetType: 'template_prompt', datasetId: runDetail.dataset_id })}>Seed Automation</a>

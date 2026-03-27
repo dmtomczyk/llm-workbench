@@ -253,7 +253,10 @@ export function ChatPage() {
   const selectedLinkedDatasetIds = linkedDatasetIds(selectedSession?.metadata);
   const linkedDatasets = useMemo(() => datasets.filter((dataset) => selectedLinkedDatasetIds.includes(dataset.id)), [datasets, selectedLinkedDatasetIds]);
   const requestedDatasetId = useMemo(() => new URLSearchParams(window.location.search).get('dataset_id') || '', []);
+  const requestedProviderId = useMemo(() => new URLSearchParams(window.location.search).get('provider_id') || '', []);
+  const requestedModelName = useMemo(() => new URLSearchParams(window.location.search).get('model') || '', []);
   const requestedDataset = useMemo(() => datasets.find((dataset) => dataset.id === requestedDatasetId) ?? null, [datasets, requestedDatasetId]);
+  const requestedProvider = useMemo(() => providers.find((provider) => provider.id === requestedProviderId) ?? null, [providers, requestedProviderId]);
   const newChatModels = providerModels[newProviderId]?.models ?? [];
   const draftModels = providerModels[draftProviderId]?.models ?? [];
   const newChatModelWarning = modelWarning(newModelName, newChatModels);
@@ -377,11 +380,25 @@ export function ChatPage() {
     setSelectedSessionId((current) => {
       const search = new URLSearchParams(window.location.search);
       const requestedSessionId = search.get('session_id') || '';
+      const requestedDatasetId = search.get('dataset_id') || '';
+      const requestedProviderId = search.get('provider_id') || '';
+      const requestedModel = search.get('model') || '';
+      const hasLaunchContext = Boolean(requestedDatasetId || requestedProviderId || requestedModel);
       const preferred = preferredSessionId || requestedSessionId || current;
       if (preferred && sessionData.some((session) => session.id === preferred)) return preferred;
+      if (!requestedSessionId && hasLaunchContext) return '';
       return sessionData[0]?.id || '';
     });
-    setNewProviderId((current) => current || providerData[0]?.id || '');
+    setNewProviderId((current) => {
+      const search = new URLSearchParams(window.location.search);
+      const requestedProviderId = search.get('provider_id') || '';
+      if (requestedProviderId && providerData.some((provider) => provider.id === requestedProviderId)) return requestedProviderId;
+      return current || providerData[0]?.id || '';
+    });
+    setNewModelName((current) => {
+      const search = new URLSearchParams(window.location.search);
+      return search.get('model') || current;
+    });
   }
 
   async function loadMessages(sessionId: string) {
@@ -857,11 +874,14 @@ export function ChatPage() {
           </div>
 
           <div className="stack compact-stack">
-            <div className="row wrap">
-              <strong>Linked Datasets:</strong>
-              {linkedDatasets.length > 0 ? linkedDatasets.map((dataset) => (
-                <span key={dataset.id} className="pill">{dataset.name}</span>
-              )) : <span className="pill">No linked datasets</span>}
+            <div className="row wrap between">
+              <div className="row wrap">
+                <strong>Linked Datasets:</strong>
+                {linkedDatasets.length > 0 ? linkedDatasets.map((dataset) => (
+                  <span key={dataset.id} className="pill">{dataset.name}</span>
+                )) : <span className="pill">No linked datasets</span>}
+              </div>
+              {selectedSession ? <button type="button" onClick={() => setShowLinkDatasetModal(true)}>{linkedDatasets.length > 0 ? 'Change Datasets' : 'Link Dataset'}</button> : null}
             </div>
             {linkedDatasets.length > 0 ? <div className="muted">These datasets are included in the chat context for new responses.</div> : null}
           </div>
@@ -890,18 +910,27 @@ export function ChatPage() {
                 <h3>Start a chat</h3>
                 <p className="muted">Chat is the main surface in BRIDGE. Start blank, start with a dataset, or jump back into a recent conversation.</p>
               </div>
-              {requestedDataset ? (
+              {(requestedDataset || requestedProvider || requestedModelName) ? (
                 <div className="notice">
-                  Ready to start from dataset <strong>{requestedDataset.name}</strong>.
+                  <div>
+                    {requestedDataset ? <>Ready to start from dataset <strong>{requestedDataset.name}</strong>.</> : <>Ready to start a new chat from the selected context.</>}
+                  </div>
+                  <div className="pill-row" style={{ marginTop: '0.75rem' }}>
+                    {requestedDataset ? <span className="pill">Dataset: {requestedDataset.name}</span> : null}
+                    {requestedProvider ? <span className="pill">Provider: {requestedProvider.name}</span> : null}
+                    {requestedModelName ? <span className="pill">Model: {requestedModelName}</span> : null}
+                  </div>
                   <div className="row wrap" style={{ marginTop: '0.75rem' }}>
-                    <button type="button" onClick={() => void onCreateDatasetLinkedChat(requestedDataset.id)}>Start chat with this dataset</button>
+                    <button type="button" onClick={() => void onCreateDatasetLinkedChat(requestedDataset?.id || '')}>Start chat with this context</button>
                     <a className="button-link" href="/datasets">Browse all datasets</a>
                   </div>
                 </div>
               ) : null}
               <div className="row wrap">
                 <button type="button" onClick={() => void onCreateSession()} disabled={!newProviderId}>Start blank chat</button>
-                {datasets[0] ? <button type="button" onClick={() => void onCreateDatasetLinkedChat(datasets[0].id)} disabled={!newProviderId}>Start with a dataset</button> : null}
+                {(requestedDataset || requestedProvider || requestedModelName)
+                  ? <button type="button" onClick={() => void onCreateDatasetLinkedChat(requestedDataset?.id || '')} disabled={!newProviderId}>Start with current selection</button>
+                  : (datasets[0] ? <button type="button" onClick={() => void onCreateDatasetLinkedChat(datasets[0].id)} disabled={!newProviderId}>Start with a dataset</button> : null)}
                 <a className="button-link" href="/datasets">Choose a dataset first</a>
               </div>
               {sessions.length > 0 ? (
