@@ -9,6 +9,7 @@ type Provider = {
   default_model?: string;
   capabilities?: Record<string, unknown>;
 };
+type Dataset = { id: string; name: string };
 type ProviderModelsResponse = { ok: boolean; provider_id: string; models: string[]; source?: string | null; message?: string | null };
 type ProviderModelCache = { models: string[]; fetchedAt: number; message?: string | null };
 type ChatSession = {
@@ -159,6 +160,7 @@ function getModelSettings(capabilities: Record<string, unknown> | undefined, mod
 
 export function ChatPage() {
   const [providers, setProviders] = useState<Provider[]>([]);
+  const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string>('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -172,10 +174,12 @@ export function ChatPage() {
   const [newProviderId, setNewProviderId] = useState('');
   const [newModelName, setNewModelName] = useState('');
   const [newSystemPrompt, setNewSystemPrompt] = useState('');
+  const [newDatasetId, setNewDatasetId] = useState('');
   const [draftTitle, setDraftTitle] = useState('');
   const [draftProviderId, setDraftProviderId] = useState('');
   const [draftModelName, setDraftModelName] = useState('');
   const [draftSystemPrompt, setDraftSystemPrompt] = useState('');
+  const [draftDatasetId, setDraftDatasetId] = useState('');
   const [providerModels, setProviderModels] = useState<Record<string, ProviderModelCache>>({});
   const [lastContextInfo, setLastContextInfo] = useState<ContextInfo | null>(null);
 
@@ -190,6 +194,8 @@ export function ChatPage() {
     () => providers.find((provider) => provider.id === (selectedSession?.provider_id ?? draftProviderId)) ?? null,
     [providers, selectedSession?.provider_id, draftProviderId],
   );
+  const groundedDatasetId = (selectedSession?.metadata?.grounding as Record<string, unknown> | undefined)?.dataset_id as string | undefined;
+  const groundedDataset = useMemo(() => datasets.find((dataset) => dataset.id === groundedDatasetId) ?? null, [datasets, groundedDatasetId]);
 
   const newChatModels = providerModels[newProviderId]?.models ?? [];
   const draftModels = providerModels[draftProviderId]?.models ?? [];
@@ -219,11 +225,13 @@ export function ChatPage() {
   }
 
   async function loadProvidersAndSessions(preferredSessionId?: string) {
-    const [providerData, sessionData] = await Promise.all([
+    const [providerData, datasetData, sessionData] = await Promise.all([
       api<Provider[]>('/api/providers').catch(() => []),
+      api<Dataset[]>('/api/datasets').catch(() => []),
       api<ChatSession[]>('/api/chat/sessions').catch(() => []),
     ]);
     setProviders(providerData);
+    setDatasets(datasetData);
     setSessions(sessionData);
     setSelectedSessionId((current) => {
       const preferred = preferredSessionId ?? current;
@@ -255,6 +263,7 @@ export function ChatPage() {
     setDraftProviderId(selectedSession?.provider_id ?? '');
     setDraftModelName(selectedSession?.model_name ?? '');
     setDraftSystemPrompt(selectedSession?.system_prompt ?? '');
+    setDraftDatasetId(((selectedSession?.metadata?.grounding as Record<string, unknown> | undefined)?.dataset_id as string | undefined) ?? '');
   }, [selectedSession]);
 
   useEffect(() => {
@@ -291,11 +300,13 @@ export function ChatPage() {
           provider_id: newProviderId,
           model_name: newModelName || undefined,
           system_prompt: newSystemPrompt || undefined,
+          metadata: newDatasetId ? { grounding: { dataset_id: newDatasetId } } : {},
         }),
       });
       setNewTitle('');
       setNewModelName('');
       setNewSystemPrompt('');
+      setNewDatasetId('');
       await loadProvidersAndSessions(created.id);
       window.setTimeout(() => composerRef.current?.focus(), 0);
     } catch (err) {
@@ -314,6 +325,7 @@ export function ChatPage() {
           provider_id: draftProviderId,
           model_name: draftModelName || null,
           system_prompt: draftSystemPrompt || null,
+          metadata: draftDatasetId ? { grounding: { dataset_id: draftDatasetId } } : {},
         }),
       });
       setLastContextInfo(null);
@@ -469,6 +481,10 @@ export function ChatPage() {
             />
             {providerModels[newProviderId]?.fetchedAt ? <div className="muted">Models fetched {new Date(providerModels[newProviderId].fetchedAt).toLocaleTimeString()}</div> : null}
             {newChatModelWarning ? <div className="muted">{newChatModelWarning}</div> : null}
+            <select value={newDatasetId} onChange={(event) => setNewDatasetId(event.target.value)}>
+              <option value="">No grounding dataset</option>
+              {datasets.map((dataset) => <option key={dataset.id} value={dataset.id}>{dataset.name}</option>)}
+            </select>
             <textarea value={newSystemPrompt} onChange={(event) => setNewSystemPrompt(event.target.value)} placeholder="Optional system prompt" rows={4} />
             <button type="submit">Create chat</button>
           </form>
@@ -487,6 +503,7 @@ export function ChatPage() {
                 >
                   <strong>{session.title}</strong>
                   <div className="muted">{providers.find((provider) => provider.id === session.provider_id)?.name ?? session.provider_id}</div>
+                  {((session.metadata?.grounding as Record<string, unknown> | undefined)?.dataset_id as string | undefined) ? <div className="muted">grounded</div> : null}
                   <div className="muted">{session.last_message_preview ?? 'No messages yet'}</div>
                 </button>
               </li>
@@ -510,6 +527,12 @@ export function ChatPage() {
                     : ' · no configured model profile')
                   : ''}
               </div>
+              {groundedDataset ? (
+                <div className="row wrap">
+                  <span className="pill">Grounded by {groundedDataset.name}</span>
+                  <a className="button-link" href={`/workbench?dataset_id=${encodeURIComponent(groundedDataset.id)}`}>Open dataset in Workbench</a>
+                </div>
+              ) : null}
               {lastContextInfo ? (
                 <div className="muted">
                   Context usage: ~{lastContextInfo.estimated_input_tokens ?? '—'} input tokens
@@ -550,6 +573,10 @@ export function ChatPage() {
               />
               {providerModels[draftProviderId]?.fetchedAt ? <div className="muted">Models fetched {new Date(providerModels[draftProviderId].fetchedAt).toLocaleTimeString()}</div> : null}
               {draftModelWarning ? <div className="muted">{draftModelWarning}</div> : null}
+              <select value={draftDatasetId} onChange={(event) => setDraftDatasetId(event.target.value)}>
+                <option value="">No grounding dataset</option>
+                {datasets.map((dataset) => <option key={dataset.id} value={dataset.id}>{dataset.name}</option>)}
+              </select>
               <textarea value={draftSystemPrompt} onChange={(event) => setDraftSystemPrompt(event.target.value)} rows={3} placeholder="System prompt" className="chat-system-prompt" />
               <div className="row between">
                 <label className="checkbox-row">

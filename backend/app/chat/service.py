@@ -23,7 +23,7 @@ from app.chat.schemas import (
     ChatSessionRead,
     ChatSessionUpdate,
 )
-from app.db.models import ChatMessage, ChatSession, LLMProvider, Run
+from app.db.models import ChatMessage, ChatSession, Dataset, DatasetVersion, LLMProvider, Run
 from app.providers.service import ProviderService
 
 
@@ -422,6 +422,7 @@ class ChatService:
             messages,
             provider,
             selected_model,
+            session_metadata=json.loads(session.metadata_json or '{}'),
         )
         run = Run(
             id=f'run_{uuid4().hex}',
@@ -466,7 +467,8 @@ class ChatService:
         messages: list[ChatMessageRead],
         provider: LLMProvider,
         model: str | None,
-    ) -> tuple[list[dict[str, str]], dict[str, int | bool | None]]:
+        session_metadata: dict | None = None,
+    ) -> tuple[list[dict[str, str]], dict[str, int | bool | None | str]]:
         capabilities = json.loads(provider.capabilities_json or '{}') if provider.capabilities_json else {}
         model_settings = ((capabilities.get('model_settings') or {}) if isinstance(capabilities, dict) else {})
         selected_settings = model_settings.get(model or '', {}) if isinstance(model_settings, dict) and model else {}
@@ -474,8 +476,11 @@ class ChatService:
         max_output_tokens = selected_settings.get('max_output_tokens') if isinstance(selected_settings, dict) else None
 
         provider_messages: list[dict[str, str]] = []
+        grounding_message, grounding_info = self._grounding_system_message(session_metadata or {})
         if system_prompt:
             provider_messages.append({'role': 'system', 'content': system_prompt})
+        if grounding_message:
+            provider_messages.append({'role': 'system', 'content': grounding_message})
 
         if not context_window:
             provider_messages.extend({'role': message.role, 'content': message.content} for message in messages)
@@ -486,6 +491,7 @@ class ChatService:
                 'estimated_input_tokens': self._estimate_messages_tokens(provider_messages),
                 'messages_included': len(messages),
                 'messages_total': len(messages),
+                **grounding_info,
             }
 
         reserve = max_output_tokens if isinstance(max_output_tokens, int) and max_output_tokens > 0 else max(1024, int(context_window * 0.2))
@@ -512,6 +518,7 @@ class ChatService:
             'estimated_input_tokens': self._estimate_messages_tokens(provider_messages),
             'messages_included': len(kept),
             'messages_total': len(messages),
+            **grounding_info,
         }
 
     @staticmethod
@@ -520,6 +527,38 @@ class ChatService:
 
     def _estimate_messages_tokens(self, messages: list[dict[str, str]]) -> int:
         return sum(self._estimate_text_tokens(message.get('content', '')) + 4 for message in messages)
+
+    def _grounding_system_message(self, session_metadata: dict) -> tuple[str | None, dict[str, str | bool | None]]:
+        grounding = session_metadata.get('grounding') if isinstance(session_metadata, dict) else None
+        if not isinstance(grounding, dict):
+            return None, {'grounded': False, 'grounding_dataset_id': None}
+        dataset_id = grounding.get('dataset_id')
+        if not isinstance(dataset_id, str) or not dataset_id:
+            return None, {'grounded': False, 'grounding_dataset_id': None}
+        dataset = self.db.get(Dataset, dataset_id)
+        if dataset is None:
+            return None, {'grounded': False, 'grounding_dataset_id': dataset_id}
+        version = self.db.scalar(select(DatasetVersion).where(DatasetVersion.dataset_id == dataset.id).order_by(desc(DatasetVersion.version_no)).limit(1))
+        preview_text = 'No preview available.'
+        row_count = None
+        if version is not None:
+            row_count = version.row_count
+            try:
+                metadata = json.loads(version.metadata_json or '{}')
+                preview = metadata.get('preview')
+                if preview is not None:
+                    preview_text = json.dumps(preview, ensure_ascii=False)[:4000]
+            except Exception:
+                pass
+        grounding_message = (
+            'Use the attached dataset context below as a primary grounding source for this chat. '
+            'Prefer answers supported by this dataset. If the answer is not present in the attached dataset, say that clearly.\n\n'
+            f'Dataset ID: {dataset.id}\n'
+            f'Dataset Name: {dataset.name}\n'
+            f'Row Count: {row_count if row_count is not None else "unknown"}\n'
+            f'Dataset Preview: {preview_text}'
+        )
+        return grounding_message, {'grounded': True, 'grounding_dataset_id': dataset.id}
 
     def _provider_row(self, provider_id: str) -> LLMProvider:
         row = self.db.get(LLMProvider, provider_id)
