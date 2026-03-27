@@ -484,6 +484,11 @@ export function WorkflowsPage() {
             {selectedWorkflowId ? <a className="button-link" href={`/automations?target_type=workflow&workflow_id=${encodeURIComponent(selectedWorkflowId)}`}>Turn into automation</a> : null}
             {runDatasetId ? <a className="button-link" href={`/workbench?dataset_id=${encodeURIComponent(runDatasetId)}&provider_id=${encodeURIComponent(runProviderId)}&template_id=${encodeURIComponent(runTemplateId)}&model=${encodeURIComponent(runModel)}`}>Open in Workbench</a> : null}
           </div>
+          <div className="pill-row">
+            <span className="pill">Dataset: {datasets.find((dataset) => dataset.id === runDatasetId)?.name ?? (runDatasetId || 'none')}</span>
+            <span className="pill">Provider: {providers.find((provider) => provider.id === runProviderId)?.name ?? (runProviderId || 'none')}</span>
+            <span className="pill">Template: {templates.find((template) => template.id === runTemplateId)?.name ?? (runTemplateId || 'none')}</span>
+          </div>
           <div className="stack">
             <select value={runDatasetId} onChange={(event) => setRunDatasetId(event.target.value)}>
               <option value="">No dataset override</option>
@@ -505,7 +510,7 @@ export function WorkflowsPage() {
 
         <div className="card">
           <h2>Helpful IDs</h2>
-          <details open>
+          <details>
             <summary>Templates</summary>
             <ul className="list">
               {templates.map((template) => <li key={template.id}><code>{template.id}</code> — {template.name} <span className="muted">({template.slug})</span></li>)}
@@ -532,6 +537,10 @@ export function WorkflowsPage() {
               <div><strong>Run:</strong> {runResult.run_id}</div>
               <div><strong>Status:</strong> {runStatus?.run.status ?? runResult.status}</div>
               {runStatus?.run.summary ? <div><strong>Summary:</strong> {runStatus.run.summary}</div> : null}
+              <div className="pill-row">
+                <span className="pill">Workflow: {selectedWorkflow?.name ?? selectedWorkflowId}</span>
+                <span className="pill">Dataset: {datasets.find((dataset) => dataset.id === runDatasetId)?.name ?? (runDatasetId || 'none')}</span>
+              </div>
               {runStatus?.run.error_text ? <pre>{runStatus.run.error_text}</pre> : null}
               <details open>
                 <summary>Outputs</summary>
