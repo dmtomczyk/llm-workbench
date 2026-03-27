@@ -221,6 +221,7 @@ export function ChatPage() {
   const [showSessionMenuModal, setShowSessionMenuModal] = useState(false);
   const [menuSessionId, setMenuSessionId] = useState('');
   const [showLinkDatasetModal, setShowLinkDatasetModal] = useState(false);
+  const [pendingDeleteSessionId, setPendingDeleteSessionId] = useState('');
   const [renamingSessionId, setRenamingSessionId] = useState('');
   const [renamingTitle, setRenamingTitle] = useState('');
   const [composerText, setComposerText] = useState('');
@@ -246,9 +247,11 @@ export function ChatPage() {
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const activeStreamAbortRef = useRef<AbortController | null>(null);
+  const sessionMenuRef = useRef<HTMLDivElement | null>(null);
 
   const selectedSession = useMemo(() => sessions.find((session) => session.id === selectedSessionId) ?? null, [sessions, selectedSessionId]);
   const menuSession = useMemo(() => sessions.find((session) => session.id === menuSessionId) ?? null, [sessions, menuSessionId]);
+  const pendingDeleteSession = useMemo(() => sessions.find((session) => session.id === pendingDeleteSessionId) ?? null, [sessions, pendingDeleteSessionId]);
   const selectedProvider = useMemo(() => providers.find((provider) => provider.id === (selectedSession?.provider_id ?? draftProviderId)) ?? null, [providers, selectedSession?.provider_id, draftProviderId]);
   const selectedLinkedDatasetIds = linkedDatasetIds(selectedSession?.metadata);
   const linkedDatasets = useMemo(() => datasets.filter((dataset) => selectedLinkedDatasetIds.includes(dataset.id)), [datasets, selectedLinkedDatasetIds]);
@@ -330,18 +333,50 @@ export function ChatPage() {
                             <strong className="session-title-line">{displaySessionTitle(session)}</strong>
                           </button>
                         )}
-                        <button
-                          type="button"
-                          className="session-menu-button"
-                          aria-label={`Open options for ${session.title}`}
-                          title="Session options"
-                          onClick={() => {
-                            setMenuSessionId(session.id);
-                            setShowSessionMenuModal(true);
-                          }}
-                        >
-                          ⋯
-                        </button>
+                        <div className="session-menu-anchor" ref={showSessionMenuModal && menuSessionId === session.id ? sessionMenuRef : null}>
+                          <button
+                            type="button"
+                            className="session-menu-button"
+                            aria-label={`Open options for ${session.title}`}
+                            title="Session options"
+                            onClick={() => {
+                              if (showSessionMenuModal && menuSessionId === session.id) {
+                                setShowSessionMenuModal(false);
+                                return;
+                              }
+                              setMenuSessionId(session.id);
+                              setShowSessionMenuModal(true);
+                            }}
+                          >
+                            ⋯
+                          </button>
+                          {showSessionMenuModal && menuSessionId === session.id ? (
+                            <div className="session-popover-menu">
+                              <button type="button" onClick={() => startRenamingSession(session)}>Rename</button>
+                              <button type="button" onClick={() => {
+                                setSelectedSessionId(session.id);
+                                setShowSessionSettings(true);
+                                setShowSessionMenuModal(false);
+                              }}>Open settings</button>
+                              <button type="button" onClick={() => {
+                                setSelectedSessionId(session.id);
+                                setShowLinkDatasetModal(true);
+                                setShowSessionMenuModal(false);
+                              }}>Link datasets</button>
+                              <button type="button" onClick={() => {
+                                setSelectedSessionId(session.id);
+                                exportTranscript('markdown');
+                                setShowSessionMenuModal(false);
+                              }}>Export .md</button>
+                              <button type="button" onClick={() => {
+                                setSelectedSessionId(session.id);
+                                exportTranscript('txt');
+                                setShowSessionMenuModal(false);
+                              }}>Export .txt</button>
+                              <button type="button" className="danger-button" onClick={() => requestDeleteSession(session)}>Delete session</button>
+                            </div>
+                          ) : null}
+                        </div>
                       </div>
                     </li>
                   );
@@ -353,7 +388,7 @@ export function ChatPage() {
         </div>
       </div>
     </div>
-  ), [groupedSessions, selectedSessionId, sessions.length, renamingSessionId, renamingTitle]);
+  ), [groupedSessions, selectedSessionId, sessions.length, renamingSessionId, renamingTitle, showSessionMenuModal, menuSessionId]);
 
   async function ensureProviderModels(providerId: string, force = false) {
     if (!providerId) return;
@@ -436,6 +471,17 @@ export function ChatPage() {
   useEffect(() => { if (draftProviderId) void ensureProviderModels(draftProviderId); }, [draftProviderId]);
   useEffect(() => { if (transcriptRef.current) transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight; }, [messages, streamingReply]);
   useEffect(() => { if (selectedSessionId && !sending) window.setTimeout(() => composerRef.current?.focus(), 0); }, [selectedSessionId, sending]);
+
+  useEffect(() => {
+    if (!showSessionMenuModal) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (sessionMenuRef.current && !sessionMenuRef.current.contains(event.target as Node)) {
+        setShowSessionMenuModal(false);
+      }
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    return () => document.removeEventListener('mousedown', onPointerDown);
+  }, [showSessionMenuModal]);
 
   useEffect(() => {
     setSubnav(chatSubnav);
@@ -563,10 +609,20 @@ export function ChatPage() {
     }
   }
 
+  function requestDeleteSession(sessionOverride?: ChatSession | null) {
+    const targetSession = sessionOverride ?? selectedSession;
+    if (!targetSession) return;
+    setPendingDeleteSessionId(targetSession.id);
+    setShowSessionMenuModal(false);
+  }
+
+  function cancelDeleteSession() {
+    setPendingDeleteSessionId('');
+  }
+
   async function onDeleteSession(sessionOverride?: ChatSession | null) {
     const targetSession = sessionOverride ?? selectedSession;
     if (!targetSession) return;
-    if (!window.confirm(`Delete chat session "${targetSession.title}"?`)) return;
     setError('');
     try {
       await api(`/api/chat/sessions/${targetSession.id}`, { method: 'DELETE' });
@@ -574,6 +630,7 @@ export function ChatPage() {
       setStreamingReply('');
       setShowSessionMenuModal(false);
       setMenuSessionId('');
+      setPendingDeleteSessionId('');
       await loadProvidersAndSessions();
     } catch (err) {
       setError(formatChatError(err));
@@ -869,7 +926,7 @@ export function ChatPage() {
               <button type="button" onClick={() => void regenerateLastResponse()} disabled={!selectedSession || sending}>Regenerate</button>
               <button type="button" onClick={() => exportTranscript('markdown')} disabled={!selectedSession}>Export .md</button>
               <button type="button" onClick={() => exportTranscript('txt')} disabled={!selectedSession}>Export .txt</button>
-              <button type="button" onClick={() => { void onDeleteSession(); }} disabled={!selectedSession} className="danger-button">Delete</button>
+              <button type="button" onClick={() => requestDeleteSession()} disabled={!selectedSession} className="danger-button">Delete</button>
             </div>
           </div>
 
@@ -1018,41 +1075,17 @@ export function ChatPage() {
         </form>
       </div>
 
-      {showSessionMenuModal ? (
-        <div className="modal-backdrop" onClick={() => setShowSessionMenuModal(false)}>
+      {pendingDeleteSession ? (
+        <div className="modal-backdrop" onClick={cancelDeleteSession}>
           <div className="modal-card modal-card-sm" onClick={(event) => event.stopPropagation()}>
             <div className="row between wrap">
-              <h2>Session Options</h2>
-              <button type="button" onClick={() => setShowSessionMenuModal(false)}>Close</button>
+              <h2>Delete chat session?</h2>
+              <button type="button" onClick={cancelDeleteSession}>Close</button>
             </div>
-            <div className="muted">{menuSession?.title ?? 'Selected chat session'}</div>
-            <div className="stack">
-              <button type="button" onClick={() => {
-                if (menuSession) startRenamingSession(menuSession);
-              }}>Rename</button>
-              <button type="button" onClick={() => {
-                if (menuSession) setSelectedSessionId(menuSession.id);
-                setShowSessionSettings(true);
-                setShowSessionMenuModal(false);
-              }}>Open settings</button>
-              <button type="button" onClick={() => {
-                if (menuSession) setSelectedSessionId(menuSession.id);
-                setShowLinkDatasetModal(true);
-                setShowSessionMenuModal(false);
-              }}>Link datasets</button>
-              <button type="button" onClick={() => {
-                if (!menuSession) return;
-                setSelectedSessionId(menuSession.id);
-                exportTranscript('markdown');
-                setShowSessionMenuModal(false);
-              }}>Export .md</button>
-              <button type="button" onClick={() => {
-                if (!menuSession) return;
-                setSelectedSessionId(menuSession.id);
-                exportTranscript('txt');
-                setShowSessionMenuModal(false);
-              }}>Export .txt</button>
-              <button type="button" className="danger-button" onClick={() => { void onDeleteSession(menuSession); }}>Delete session</button>
+            <div className="muted">This will permanently delete <strong>{displaySessionTitle(pendingDeleteSession)}</strong> and its messages.</div>
+            <div className="row wrap" style={{ marginTop: '1rem', justifyContent: 'flex-end' }}>
+              <button type="button" onClick={cancelDeleteSession}>Cancel</button>
+              <button type="button" className="danger-button" onClick={() => { void onDeleteSession(pendingDeleteSession); }}>Delete session</button>
             </div>
           </div>
         </div>

@@ -325,6 +325,7 @@ pre {
 }
 .session-row-item {
   min-width: 0;
+  position: relative;
 }
 .session-row {
   display: grid;
@@ -377,6 +378,27 @@ pre {
 .session-menu-button:hover {
   color: #e6edf3;
   background: #1b222c;
+}
+.session-menu-anchor {
+  position: relative;
+}
+.session-popover-menu {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  right: 0;
+  z-index: 30;
+  min-width: 180px;
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.35rem;
+  border: 1px solid #30363d;
+  border-radius: 0.8rem;
+  background: #11161d;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.38);
+}
+.session-popover-menu button {
+  width: 100%;
+  text-align: left;
 }
 .chat-page-single {
   min-height: calc(100vh - 140px);
