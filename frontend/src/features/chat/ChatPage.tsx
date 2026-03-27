@@ -60,9 +60,14 @@ type ChatCompleteResponse = {
   };
 };
 
+type StreamStatus = 'idle' | 'connecting' | 'streaming' | 'finalizing' | 'cancelled' | 'error';
+
 type StreamEvent = {
   runId?: string;
+  sessionId?: string;
+  messageId?: string | null;
   content?: string;
+  delta?: string;
   message?: string;
   statusCode?: number;
   detail?: Record<string, unknown>;
@@ -189,6 +194,9 @@ export function ChatPage() {
   const [showLinkDatasetModal, setShowLinkDatasetModal] = useState(false);
   const [composerText, setComposerText] = useState('');
   const [streamingReply, setStreamingReply] = useState('');
+  const [streamStatus, setStreamStatus] = useState<StreamStatus>('idle');
+  const [streamStatusText, setStreamStatusText] = useState('');
+  const [lastSubmittedText, setLastSubmittedText] = useState('');
   const [newProviderId, setNewProviderId] = useState('');
   const [newModelName, setNewModelName] = useState('');
   const [newSystemPrompt, setNewSystemPrompt] = useState('');
@@ -205,6 +213,7 @@ export function ChatPage() {
   const { setSubnav } = useShellSubnav();
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const activeStreamAbortRef = useRef<AbortController | null>(null);
 
   const selectedSession = useMemo(() => sessions.find((session) => session.id === selectedSessionId) ?? null, [sessions, selectedSessionId]);
   const menuSession = useMemo(() => sessions.find((session) => session.id === menuSessionId) ?? null, [sessions, menuSessionId]);
@@ -447,10 +456,13 @@ export function ChatPage() {
     const content = composerText.trim();
     if (!content) return;
     const optimisticMessage: ChatMessage = { id: `temp-user-${Date.now()}`, session_id: selectedSessionId, role: 'user', content, sequence_no: messages.length + 1, created_at: new Date().toISOString() };
+    setLastSubmittedText(content);
     setMessages((current) => [...current, optimisticMessage]);
     setSending(true);
     setError('');
     setStreamingReply('');
+    setStreamStatus('idle');
+    setStreamStatusText('');
     try {
       if (streamEnabled) {
         await streamSend(selectedSessionId, content);
@@ -462,43 +474,103 @@ export function ChatPage() {
       await loadProvidersAndSessions(selectedSessionId);
       await loadMessages(selectedSessionId);
       setStreamingReply('');
+      setStreamStatus('idle');
+      setStreamStatusText('');
       setComposerText('');
       window.setTimeout(() => composerRef.current?.focus(), 0);
     } catch (err) {
       setError(formatChatError(err));
       await loadMessages(selectedSessionId);
-      setStreamingReply('');
+      if (streamEnabled && streamingReply.trim()) {
+        setStreamStatus('error');
+        setStreamStatusText('Stream interrupted — partial response shown below.');
+      } else {
+        setStreamingReply('');
+        setStreamStatus('idle');
+        setStreamStatusText('');
+      }
     } finally {
       setSending(false);
     }
   }
 
   async function streamSend(sessionId: string, content: string) {
-    const response = await fetch(`/api/chat/sessions/${sessionId}/stream`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content }) });
-    if (!response.ok || !response.body) throw new Error(await response.text() || 'Streaming request failed');
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    while (true) {
-      const { value, done } = await reader.read();
-      buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
-      const parts = buffer.split('\n\n');
-      buffer = parts.pop() || '';
-      for (const part of parts) {
-        const lines = part.split('\n');
-        let eventName = 'message';
-        const dataLines: string[] = [];
-        for (const line of lines) {
-          if (line.startsWith('event:')) eventName = line.slice(6).trim();
-          if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+    const abortController = new AbortController();
+    activeStreamAbortRef.current = abortController;
+    setStreamStatus('connecting');
+    setStreamStatusText('Connecting to provider…');
+    let latestContent = '';
+    try {
+      const response = await fetch(`/api/chat/sessions/${sessionId}/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+        signal: abortController.signal,
+      });
+      if (!response.ok || !response.body) throw new Error(await response.text() || 'Streaming request failed');
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let sawDone = false;
+      while (true) {
+        const { value, done } = await reader.read();
+        buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop() || '';
+        for (const part of parts) {
+          const lines = part.split('\n');
+          let eventName = 'message';
+          const dataLines: string[] = [];
+          for (const line of lines) {
+            if (line.startsWith('event:')) eventName = line.slice(6).trim();
+            if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+          }
+          if (dataLines.length === 0) continue;
+          const data = JSON.parse(dataLines.join('\n')) as StreamEvent;
+          if (data.contextInfo) setLastContextInfo(data.contextInfo);
+          if (eventName === 'metadata') {
+            setStreamStatus('connecting');
+            setStreamStatusText('Connected — waiting for first tokens…');
+            continue;
+          }
+          if (eventName === 'chunk') {
+            latestContent = data.content || latestContent;
+            setStreamStatus('streaming');
+            setStreamStatusText('Streaming response…');
+            setStreamingReply(latestContent);
+            continue;
+          }
+          if (eventName === 'done') {
+            sawDone = true;
+            setStreamStatus('finalizing');
+            setStreamStatusText('Finalizing message…');
+            continue;
+          }
+          if (eventName === 'error') {
+            const hasPartial = Boolean((data.content || latestContent).trim());
+            setStreamStatus('error');
+            setStreamStatusText(hasPartial ? 'Stream interrupted — partial response shown below.' : 'Stream failed before any response was received.');
+            throw new Error(describeStreamError(data));
+          }
         }
-        if (dataLines.length === 0) continue;
-        const data = JSON.parse(dataLines.join('\n')) as StreamEvent;
-        if (data.contextInfo) setLastContextInfo(data.contextInfo);
-        if (eventName === 'chunk') setStreamingReply(data.content || '');
-        if (eventName === 'error') throw new Error(describeStreamError(data));
+        if (done) break;
       }
-      if (done) break;
+      if (!sawDone) {
+        const hasPartial = Boolean(latestContent.trim());
+        setStreamStatus(hasPartial ? 'error' : 'idle');
+        setStreamStatusText(hasPartial ? 'Connection closed before the response finished.' : 'Stream ended unexpectedly before any response was received.');
+        throw new Error(hasPartial ? 'Stream ended before final confirmation was received.' : 'Stream ended unexpectedly before any response was received.');
+      }
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        const hasPartial = Boolean(latestContent.trim());
+        setStreamStatus(hasPartial ? 'cancelled' : 'idle');
+        setStreamStatusText(hasPartial ? 'Streaming cancelled — partial response shown below.' : 'Streaming cancelled.');
+        return;
+      }
+      throw err;
+    } finally {
+      activeStreamAbortRef.current = null;
     }
   }
 
@@ -512,6 +584,81 @@ export function ChatPage() {
   function toggleDatasetSelection(datasetId: string, selectedIds: string[], setSelectedIds: (ids: string[]) => void) {
     setSelectedIds(selectedIds.includes(datasetId) ? selectedIds.filter((id) => id !== datasetId) : [...selectedIds, datasetId]);
   }
+
+  async function copyStreamingReply() {
+    if (!streamingReply.trim()) return;
+    try {
+      await navigator.clipboard.writeText(streamingReply);
+      setStreamStatusText('Partial response copied to clipboard.');
+    } catch {
+      setError('Could not copy the partial response to the clipboard.');
+    }
+  }
+
+  function cancelStreaming() {
+    activeStreamAbortRef.current?.abort();
+  }
+
+  async function retryLastSend() {
+    if (!selectedSessionId || !lastSubmittedText.trim() || sending) return;
+    setComposerText(lastSubmittedText);
+    const optimisticMessage: ChatMessage = {
+      id: `temp-user-retry-${Date.now()}`,
+      session_id: selectedSessionId,
+      role: 'user',
+      content: lastSubmittedText,
+      sequence_no: messages.length + 1,
+      created_at: new Date().toISOString(),
+    };
+    setMessages((current) => [...current, optimisticMessage]);
+    setSending(true);
+    setError('');
+    setStreamingReply('');
+    setStreamStatus('idle');
+    setStreamStatusText('');
+    try {
+      if (streamEnabled) {
+        await streamSend(selectedSessionId, lastSubmittedText);
+      } else {
+        const result = await api<ChatCompleteResponse>(`/api/chat/sessions/${selectedSessionId}/complete`, { method: 'POST', body: JSON.stringify({ content: lastSubmittedText }) });
+        setLastContextInfo(result.provider_result.context_info ?? null);
+        if (result.provider_result.status !== 'success') throw new Error(`Provider returned ${result.provider_result.status}: ${result.provider_result.summary}`);
+      }
+      await loadProvidersAndSessions(selectedSessionId);
+      await loadMessages(selectedSessionId);
+      setStreamingReply('');
+      setStreamStatus('idle');
+      setStreamStatusText('');
+      setComposerText('');
+      window.setTimeout(() => composerRef.current?.focus(), 0);
+    } catch (err) {
+      setError(formatChatError(err));
+      await loadMessages(selectedSessionId);
+      if (streamEnabled && streamingReply.trim()) {
+        setStreamStatus('error');
+        setStreamStatusText('Stream interrupted — partial response shown below.');
+      } else {
+        setStreamingReply('');
+        setStreamStatus('idle');
+        setStreamStatusText('');
+      }
+    } finally {
+      setSending(false);
+    }
+  }
+
+  const streamBannerClass = streamStatus === 'error' ? 'notice error' : 'notice';
+  const submitLabel = sending
+    ? (streamEnabled
+      ? (streamStatus === 'connecting'
+        ? 'Connecting…'
+        : streamStatus === 'finalizing'
+          ? 'Finalizing…'
+          : streamStatus === 'cancelled'
+            ? 'Cancelled'
+            : 'Streaming…')
+      : 'Sending…')
+    : (streamEnabled ? 'Send + stream' : 'Send');
 
   return (
     <div className="stack chat-page-single">
@@ -580,7 +727,21 @@ export function ChatPage() {
               <pre>{message.content}</pre>
             </div>
           ))}
-          {streamingReply ? <div className="message assistant streaming-message"><div className="message-role">assistant · streaming</div><pre>{streamingReply}</pre></div> : null}
+          {streamingReply ? (
+            <div className="message assistant streaming-message">
+              <div className="message-role">
+                assistant · {streamStatus === 'error' ? 'interrupted' : streamStatus === 'cancelled' ? 'cancelled' : streamStatus === 'finalizing' ? 'finalizing' : 'streaming'}
+              </div>
+              {streamStatusText ? <div className="muted">{streamStatusText}</div> : null}
+              <pre>{streamingReply}</pre>
+              {(streamStatus === 'error' || streamStatus === 'cancelled') ? (
+                <div className="row wrap">
+                  <button type="button" onClick={() => void retryLastSend()} disabled={!lastSubmittedText || sending}>Retry send</button>
+                  <button type="button" onClick={() => void copyStreamingReply()} disabled={!streamingReply.trim()}>Copy partial</button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
 
         <form className="stack chat-composer" onSubmit={onSend}>
@@ -590,9 +751,15 @@ export function ChatPage() {
             </div>
           ) : null}
           <textarea ref={composerRef} value={composerText} onChange={(event) => setComposerText(event.target.value)} onKeyDown={onComposerKeyDown} name="content" placeholder={selectedSessionId ? (selectedSessionHasProvider ? 'Type your message…' : 'Choose a provider in Settings to enable chatting') : 'Create or select a chat first'} rows={5} disabled={!selectedSessionId || sending || !selectedSessionHasProvider} />
+          {(streamEnabled && streamStatus !== 'idle' && streamStatusText) ? (
+            <div className={streamBannerClass}>{streamStatusText}</div>
+          ) : null}
           <div className="row between wrap">
             {error ? <pre>{error}</pre> : <span className="muted">Linked datasets are injected into this session’s chat context.</span>}
-            <button type="submit" disabled={!selectedSessionId || sending || !selectedSessionHasProvider}>{sending ? (streamEnabled ? 'Streaming…' : 'Sending…') : (streamEnabled ? 'Send + stream' : 'Send')}</button>
+            <div className="row wrap">
+              {sending && streamEnabled ? <button type="button" onClick={cancelStreaming}>Cancel stream</button> : null}
+              <button type="submit" disabled={!selectedSessionId || sending || !selectedSessionHasProvider}>{submitLabel}</button>
+            </div>
           </div>
         </form>
       </div>
