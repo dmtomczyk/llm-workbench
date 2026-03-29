@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 
+import { MetricTile, MultiLineTextField, StatusChip, TextBox } from '../../design-system/components';
 import { api } from '../../lib/api';
 
 type AboutInfo = {
@@ -111,9 +112,34 @@ export function SettingsPage() {
 
   return (
     <div className="stack">
+      <div className="card stack">
+        <div className="row between wrap" style={{ alignItems: 'flex-start', gap: 16 }}>
+          <div className="stack compact-stack" style={{ maxWidth: '52rem' }}>
+            <div className="muted" style={{ textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: 12 }}>System Configuration</div>
+            <h2 style={{ margin: 0 }}>Settings</h2>
+            <p className="muted" style={{ margin: 0 }}>Control BRIDGE runtime defaults, authentication behavior, environment metadata, and diagnostic visibility from a more cohesive operational surface.</p>
+          </div>
+          <div className="row wrap" style={{ gap: 8 }}>
+            <StatusChip text={authConfig.enabled ? 'Auth Enabled' : 'Auth Disabled'} tone={authConfig.enabled ? 'selected' : 'disabled'} chipStyle="box" backgroundEffect={authConfig.enabled ? 'glow' : 'matte'} />
+            {about ? <StatusChip text={about.environment} tone="hover" chipStyle="box" backgroundEffect="matte" /> : null}
+          </div>
+        </div>
+      </div>
+
+      {about ? (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
+          <MetricTile label={`Version · ${about.short_name}`} value={about.version} tone="info" />
+          <MetricTile label="Providers" value={String(about.seededProviders.length)} tone="neutral" />
+          <MetricTile label={`Surfaces · ${about.timezone}`} value={String(about.seededFeatures.length)} tone="neutral" />
+        </div>
+      ) : null}
+
       <div className="grid two-col">
         <div className="card stack">
-          <h2>About</h2>
+          <div className="stack compact-stack">
+            <h2>About</h2>
+            <div className="muted">Product identity, runtime context, and installed environment details.</div>
+          </div>
           {!about ? <p className="muted">Loading…</p> : (
             <>
               <div>
@@ -121,34 +147,36 @@ export function SettingsPage() {
                 <div className="muted">{about.tagline}</div>
               </div>
               <p>{about.description}</p>
-              <ul className="list compact-list">
-                <li><strong>Short name:</strong> {about.short_name}</li>
-                <li><strong>Acronym:</strong> {about.acronym_expansion}</li>
-                <li><strong>Version:</strong> {about.version}</li>
-                <li><strong>Environment:</strong> {about.environment}</li>
-                <li><strong>Timezone:</strong> {about.timezone}</li>
-              </ul>
+              <div className="grid two-col" style={{ gap: 12 }}>
+                <div><strong>Short name</strong><div className="muted">{about.short_name}</div></div>
+                <div><strong>Acronym</strong><div className="muted">{about.acronym_expansion}</div></div>
+                <div><strong>Environment</strong><div className="muted">{about.environment}</div></div>
+                <div><strong>Timezone</strong><div className="muted">{about.timezone}</div></div>
+              </div>
             </>
           )}
         </div>
 
         <div className="card stack">
-          <h2>Version & defaults</h2>
+          <div className="stack compact-stack">
+            <h2>Version & defaults</h2>
+            <div className="muted">Seeded providers and enabled surfaces available in this BRIDGE environment.</div>
+          </div>
           {!about ? <p className="muted">Loading…</p> : (
             <>
               <div>
                 <strong>Seeded providers</strong>
-                <div className="pill-row">
-                  {about.seededProviders.map((item) => <span className="pill" key={item}>{item}</span>)}
+                <div className="row wrap" style={{ gap: 8, marginTop: 8 }}>
+                  {about.seededProviders.map((item) => <StatusChip key={item} text={item} tone="hover" chipStyle="box" backgroundEffect="matte" />)}
                 </div>
               </div>
               <div>
                 <strong>Enabled surfaces</strong>
-                <div className="pill-row">
-                  {about.seededFeatures.map((item) => <span className="pill" key={item}>{item}</span>)}
+                <div className="row wrap" style={{ gap: 8, marginTop: 8 }}>
+                  {about.seededFeatures.map((item) => <StatusChip key={item} text={item} tone="selected" chipStyle="box" backgroundEffect="matte" />)}
                 </div>
               </div>
-              <p className="muted">This page is intended to become the home for app metadata, release notes, branding, and environment diagnostics.</p>
+              <p className="muted">This page should evolve into the home for branding, release notes, environment diagnostics, and administrative defaults.</p>
             </>
           )}
         </div>
@@ -169,41 +197,98 @@ export function SettingsPage() {
       </div>
 
       <div className="card stack">
-        <h2>Authentication / SSO</h2>
-        <p className="muted">Configure generic OIDC login for BRIDGE. Once enabled, the frontend redirects unauthenticated users to the Login page and the backend requires a valid BRIDGE session JWT for API access.</p>
-        <label className="checkbox-row"><input type="checkbox" checked={authConfig.enabled} onChange={(event) => setAuthConfig((current) => ({ ...current, enabled: event.target.checked }))} /><span>Enable authentication</span></label>
-        <label className="checkbox-row"><input type="checkbox" checked={authConfig.local_dev_bypass} onChange={(event) => setAuthConfig((current) => ({ ...current, local_dev_bypass: event.target.checked }))} /><span>Allow local dev bypass button on Login page</span></label>
-        <div className="grid two-col">
-          <div className="stack">
-            <input value={authConfig.oidc.issuer_url} onChange={(event) => setAuthConfig((current) => ({ ...current, oidc: { ...current.oidc, issuer_url: event.target.value } }))} placeholder="OIDC issuer URL" />
-            <input value={authConfig.oidc.discovery_url || ''} onChange={(event) => setAuthConfig((current) => ({ ...current, oidc: { ...current.oidc, discovery_url: event.target.value } }))} placeholder="Optional discovery URL override" />
-            <input value={authConfig.oidc.client_id} onChange={(event) => setAuthConfig((current) => ({ ...current, oidc: { ...current.oidc, client_id: event.target.value } }))} placeholder="OIDC client ID" />
-            <input value={authConfig.oidc.client_secret} onChange={(event) => setAuthConfig((current) => ({ ...current, oidc: { ...current.oidc, client_secret: event.target.value } }))} placeholder={authConfig.oidc.client_secret_configured ? 'Client secret already saved — enter to replace' : 'OIDC client secret'} />
-            <input value={authConfig.oidc.frontend_base_url || ''} onChange={(event) => setAuthConfig((current) => ({ ...current, oidc: { ...current.oidc, frontend_base_url: event.target.value } }))} placeholder="Frontend base URL (e.g. https://bridge.example.com)" />
-            <input value={authConfig.oidc.redirect_path} onChange={(event) => setAuthConfig((current) => ({ ...current, oidc: { ...current.oidc, redirect_path: event.target.value } }))} placeholder="Callback path" />
+        <div className="row between wrap" style={{ alignItems: 'flex-start', gap: 16 }}>
+          <div className="stack compact-stack" style={{ maxWidth: '52rem' }}>
+            <h2>Authentication / SSO</h2>
+            <p className="muted" style={{ margin: 0 }}>Configure generic OIDC login for BRIDGE. Once enabled, the frontend redirects unauthenticated users to the Login page and the backend requires a valid BRIDGE session JWT for API access.</p>
           </div>
-          <div className="stack">
-            <input value={authConfig.oidc.audience || ''} onChange={(event) => setAuthConfig((current) => ({ ...current, oidc: { ...current.oidc, audience: event.target.value } }))} placeholder="Optional audience" />
-            <input value={authConfig.oidc.scopes.join(' ')} onChange={(event) => setAuthConfig((current) => ({ ...current, oidc: { ...current.oidc, scopes: event.target.value.split(/\s+/).filter(Boolean) } }))} placeholder="Scopes (space separated)" />
-            <input value={authConfig.session_cookie_name} onChange={(event) => setAuthConfig((current) => ({ ...current, session_cookie_name: event.target.value }))} placeholder="Session cookie name" />
-            <input value={authConfig.session_jwt_secret} onChange={(event) => setAuthConfig((current) => ({ ...current, session_jwt_secret: event.target.value }))} placeholder={authConfig.session_jwt_secret_configured ? 'Session JWT secret already saved — enter to replace' : 'Session JWT signing secret'} />
-            <input value={String(authConfig.session_ttl_seconds)} onChange={(event) => setAuthConfig((current) => ({ ...current, session_ttl_seconds: Number(event.target.value || 0) || 0 }))} placeholder="Session TTL seconds" />
-            <input value={authConfig.local_dev_bypass_name} onChange={(event) => setAuthConfig((current) => ({ ...current, local_dev_bypass_name: event.target.value }))} placeholder="Local dev bypass display name" />
-            <input value={authConfig.local_dev_bypass_email} onChange={(event) => setAuthConfig((current) => ({ ...current, local_dev_bypass_email: event.target.value }))} placeholder="Local dev bypass email" />
-            <input value={authConfig.local_dev_bypass_subject} onChange={(event) => setAuthConfig((current) => ({ ...current, local_dev_bypass_subject: event.target.value }))} placeholder="Local dev bypass subject" />
+          <div className="row wrap" style={{ gap: 8 }}>
+            <StatusChip text={authConfig.enabled ? 'Enabled' : 'Disabled'} tone={authConfig.enabled ? 'selected' : 'disabled'} chipStyle="box" backgroundEffect={authConfig.enabled ? 'glow' : 'matte'} />
+            {authConfig.local_dev_bypass ? <StatusChip text="Dev Bypass" tone="warning" chipStyle="box" backgroundEffect="matte" /> : null}
           </div>
         </div>
-        <div className="notice">
-          For local testing, keep dev bypass enabled and point OIDC to a local provider such as Keycloak. Typical local values are frontend base URL <code>http://localhost:5173</code> and callback path <code>/api/auth/callback</code>.
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
+          <MetricTile label="Mode" value={authConfig.mode.toUpperCase()} tone="info" size="sm" />
+          <MetricTile label="Session TTL" value={`${Math.round(authConfig.session_ttl_seconds / 3600)}h`} tone="neutral" size="sm" />
+          <MetricTile label="Callback" value={authConfig.oidc.redirect_path || '—'} tone="neutral" size="sm" />
         </div>
-        <div className="row wrap">
+
+        <div className="stack" style={{ padding: 18, border: '1px solid rgba(156,198,216,0.16)', background: 'linear-gradient(180deg, rgba(22,32,41,0.54) 0%, rgba(15,22,30,0.42) 100%)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03)' }}>
+          <div className="stack compact-stack" style={{ paddingBottom: 12, borderBottom: '1px solid rgba(156,198,216,0.14)' }}>
+            <strong>Access policy</strong>
+            <div className="muted">Top-level switches that control whether authentication is required and whether local developers can bypass login during setup.</div>
+            <div className="row wrap" style={{ gap: 8, marginTop: 4 }}>
+              <StatusChip
+                text="Authentication"
+                trailing={authConfig.enabled ? 'ON' : 'OFF'}
+                tone={authConfig.enabled ? 'selected' : 'default'}
+                chipStyle="box"
+                backgroundEffect={authConfig.enabled ? 'glow' : 'matte'}
+                clickable
+                active={authConfig.enabled}
+                onClick={() => setAuthConfig((current) => ({ ...current, enabled: !current.enabled }))}
+              />
+              <StatusChip
+                text="Dev Bypass"
+                trailing={authConfig.local_dev_bypass ? 'ON' : 'OFF'}
+                tone={authConfig.local_dev_bypass ? 'warning' : 'default'}
+                chipStyle="box"
+                backgroundEffect={authConfig.local_dev_bypass ? 'glow' : 'matte'}
+                clickable
+                active={authConfig.local_dev_bypass}
+                onClick={() => setAuthConfig((current) => ({ ...current, local_dev_bypass: !current.local_dev_bypass }))}
+              />
+            </div>
+            <div className="notice">
+              For local testing, keep dev bypass enabled and point OIDC to a local provider such as Keycloak. Typical local values are frontend base URL <code>http://localhost:5173</code> and callback path <code>/api/auth/callback</code>.
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1.15fr 1fr', gap: 16 }}>
+            <div className="stack" style={{ gap: 14 }}>
+              <div className="stack compact-stack">
+                <strong>Identity provider</strong>
+                <div className="muted">Core OIDC connection parameters used by BRIDGE to negotiate login and validate user sessions.</div>
+              </div>
+              <div className="grid two-col">
+                <TextBox label={<strong>OIDC issuer URL</strong>} value={authConfig.oidc.issuer_url} onChange={(value) => setAuthConfig((current) => ({ ...current, oidc: { ...current.oidc, issuer_url: value } }))} placeholder="https://issuer.example.com" />
+                <TextBox label={<strong>Discovery URL override</strong>} value={authConfig.oidc.discovery_url || ''} onChange={(value) => setAuthConfig((current) => ({ ...current, oidc: { ...current.oidc, discovery_url: value } }))} placeholder="Optional discovery URL override" />
+                <TextBox label={<strong>OIDC client ID</strong>} value={authConfig.oidc.client_id} onChange={(value) => setAuthConfig((current) => ({ ...current, oidc: { ...current.oidc, client_id: value } }))} placeholder="OIDC client ID" />
+                <TextBox label={<strong>OIDC client secret</strong>} type="password" value={authConfig.oidc.client_secret} onChange={(value) => setAuthConfig((current) => ({ ...current, oidc: { ...current.oidc, client_secret: value } }))} placeholder={authConfig.oidc.client_secret_configured ? 'Client secret already saved — enter to replace' : 'OIDC client secret'} />
+                <TextBox label={<strong>Frontend base URL</strong>} value={authConfig.oidc.frontend_base_url || ''} onChange={(value) => setAuthConfig((current) => ({ ...current, oidc: { ...current.oidc, frontend_base_url: value } }))} placeholder="https://bridge.example.com" />
+                <TextBox label={<strong>Callback path</strong>} value={authConfig.oidc.redirect_path} onChange={(value) => setAuthConfig((current) => ({ ...current, oidc: { ...current.oidc, redirect_path: value } }))} placeholder="/api/auth/callback" />
+                <TextBox label={<strong>Audience</strong>} value={authConfig.oidc.audience || ''} onChange={(value) => setAuthConfig((current) => ({ ...current, oidc: { ...current.oidc, audience: value } }))} placeholder="Optional audience" />
+                <TextBox label={<strong>Scopes</strong>} value={authConfig.oidc.scopes.join(' ')} onChange={(value) => setAuthConfig((current) => ({ ...current, oidc: { ...current.oidc, scopes: value.split(/\s+/).filter(Boolean) } }))} placeholder="openid profile email" />
+              </div>
+            </div>
+
+            <div className="stack" style={{ gap: 14 }}>
+              <div className="stack compact-stack">
+                <strong>Session & local identity</strong>
+                <div className="muted">Controls for session cookies, JWT signing, token lifetime, and the fallback local development identity.</div>
+              </div>
+              <TextBox label={<strong>Session cookie name</strong>} value={authConfig.session_cookie_name} onChange={(value) => setAuthConfig((current) => ({ ...current, session_cookie_name: value }))} placeholder="Session cookie name" />
+              <TextBox label={<strong>Session JWT secret</strong>} type="password" value={authConfig.session_jwt_secret} onChange={(value) => setAuthConfig((current) => ({ ...current, session_jwt_secret: value }))} placeholder={authConfig.session_jwt_secret_configured ? 'Session JWT secret already saved — enter to replace' : 'Session JWT signing secret'} />
+              <TextBox label={<strong>Session TTL seconds</strong>} value={String(authConfig.session_ttl_seconds)} onChange={(value) => setAuthConfig((current) => ({ ...current, session_ttl_seconds: Number(value || 0) || 0 }))} placeholder="28800" />
+              <TextBox label={<strong>Display name</strong>} value={authConfig.local_dev_bypass_name} onChange={(value) => setAuthConfig((current) => ({ ...current, local_dev_bypass_name: value }))} placeholder="Local Developer" />
+              <TextBox label={<strong>Email</strong>} value={authConfig.local_dev_bypass_email} onChange={(value) => setAuthConfig((current) => ({ ...current, local_dev_bypass_email: value }))} placeholder="dev@localhost" />
+              <TextBox label={<strong>Subject</strong>} value={authConfig.local_dev_bypass_subject} onChange={(value) => setAuthConfig((current) => ({ ...current, local_dev_bypass_subject: value }))} placeholder="dev-user" />
+            </div>
+          </div>
+        </div>
+
+        <div className="row wrap" style={{ gap: 10, alignItems: 'center', justifyContent: 'space-between' }}>
+          {authSaved ? <span className="muted">{authSaved}</span> : <span className="muted">Save after changing OIDC, session, or local development identity values.</span>}
           <button type="button" onClick={() => { void saveAuthConfig(); }}>Save SSO settings</button>
-          {authSaved ? <span className="muted">{authSaved}</span> : null}
         </div>
       </div>
 
       <div className="card stack">
-        <h2>Runtime settings snapshot</h2>
+        <div className="stack compact-stack">
+          <h2>Runtime settings snapshot</h2>
+          <div className="muted">Live config visibility for debugging, verification, and environment drift inspection.</div>
+        </div>
         {!settingsInfo ? <p className="muted">Loading…</p> : (
           <>
             <details open>

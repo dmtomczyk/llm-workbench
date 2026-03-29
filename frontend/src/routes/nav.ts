@@ -10,7 +10,8 @@ export type AppRoute =
   | 'automations'
   | 'audit'
   | 'plugins'
-  | 'settings';
+  | 'settings'
+  | 'ui-kit';
 
 export type NavItem = { route: AppRoute; label: string; path: string; description?: string };
 export type NavSection = { id: string; label: string; items: NavItem[] };
@@ -43,6 +44,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { route: 'connectors', label: 'Connectors', path: '/connectors' },
       { route: 'plugins', label: 'Plugins', path: '/plugins' },
       { route: 'settings', label: 'Settings', path: '/settings' },
+      { route: 'ui-kit', label: 'UI Kit', path: '/ui-kit' },
       { route: 'audit', label: 'Audit', path: '/audit' },
     ],
   },

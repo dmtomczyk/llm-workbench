@@ -1,5 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
+import { InstrumentDataTable, type InstrumentTableRow } from '../../design-system/components/InstrumentDataTable';
+import { MetricTile } from '../../design-system/components/MetricTile';
+import { StatusChip } from '../../design-system/components/StatusChip';
 import { api } from '../../lib/api';
 
 type Plugin = { id: string; load_status: string; kind: string };
@@ -7,6 +10,12 @@ type Provider = { id: string; name: string };
 type Audit = { id: string; action: string; status: string; occurred_at: string };
 type Dataset = { id: string; name: string; latest_version_no?: number; updated_at?: string; created_at?: string };
 type ChatSession = { id: string; title: string; provider_id: string; updated_at: string; last_message_preview?: string };
+
+function formatDate(value?: string): string {
+  if (!value) return '—';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
+}
 
 export function DashboardPage() {
   const [health, setHealth] = useState<string>('loading');
@@ -25,12 +34,40 @@ export function DashboardPage() {
     api<ChatSession[]>('/api/chat/sessions').then((data) => setSessions(data.slice(0, 5))).catch(() => setSessions([]));
   }, []);
 
+  const sessionRows = useMemo<InstrumentTableRow[]>(() => sessions.map((session, index) => ({
+    id: session.id,
+    icon: index % 2 === 0 ? '⌕' : '✓',
+    name: session.title || 'Untitled Session',
+    category: session.provider_id || 'chat',
+    status: { tone: 'green', label: session.last_message_preview ? 'Active' : 'Idle' },
+    date: formatDate(session.updated_at),
+    actions: [28, 18],
+  })), [sessions]);
+
+  const datasetRows = useMemo<InstrumentTableRow[]>(() => datasets.map((dataset, index) => ({
+    id: dataset.id,
+    icon: index % 2 === 0 ? '✎' : '⌘',
+    name: dataset.name,
+    category: `v${dataset.latest_version_no ?? 0}`,
+    status: { tone: 'amber', label: 'Ready' },
+    date: formatDate(dataset.updated_at ?? dataset.created_at),
+    actions: [24, 16],
+  })), [datasets]);
+
+  const healthTone = health === 'ok' ? 'success' : health === 'loading' ? 'warning' : 'error';
+
   return (
     <div className="stack">
       <div className="card stack">
-        <div>
-          <h2>Home</h2>
-          <p className="muted">Start in chat, ground answers with datasets, then move into workbench, workflows, imports, or automations when the work becomes more structured.</p>
+        <div className="row between wrap" style={{ alignItems: 'flex-start', gap: 16 }}>
+          <div>
+            <h2>Home</h2>
+            <p className="muted">Start in chat, ground answers with datasets, then move into workbench, workflows, imports, or automations when the work becomes more structured.</p>
+          </div>
+          <div className="row wrap" style={{ gap: 10 }}>
+            <StatusChip text="System Online" tone={healthTone} chipStyle="rounded" backgroundEffect="glow" haloBoost={1.5} />
+            <StatusChip text="Grounded Chat First" tone="selected" chipStyle="rounded" backgroundEffect="glow" haloBoost={1.5} />
+          </div>
         </div>
         <div className="row wrap">
           <a className="button-link" href="/chat">Start chatting</a>
@@ -41,18 +78,9 @@ export function DashboardPage() {
       </div>
 
       <div className="grid cards">
-        <div className="card">
-          <h3>Backend Health</h3>
-          <p className="metric">{health}</p>
-        </div>
-        <div className="card">
-          <h3>Plugins Loaded</h3>
-          <p className="metric">{pluginCount}</p>
-        </div>
-        <div className="card">
-          <h3>Providers</h3>
-          <p className="metric">{providerCount}</p>
-        </div>
+        <MetricTile value={health} label="Backend Health" tone={health === 'ok' ? 'success' : health === 'loading' ? 'warning' : 'danger'} emphasis="strong" />
+        <MetricTile value={pluginCount} label="Plugins Loaded" tone="info" />
+        <MetricTile value={providerCount} label="Providers" tone="neutral" />
       </div>
 
       <div className="grid two-col">
@@ -61,30 +89,29 @@ export function DashboardPage() {
             <h3>Recent chats</h3>
             <div className="muted">Chat is the primary surface for everyday grounded work.</div>
           </div>
-          <ul className="list">
-            {sessions.length === 0 ? <li>No chat sessions yet.</li> : sessions.map((session) => (
-              <li key={session.id}>
-                <a className="button-link" href={`/chat?session_id=${encodeURIComponent(session.id)}`}>
-                  <strong>{session.title}</strong>
-                </a>
-                <div className="muted">{session.last_message_preview || 'No messages yet.'}</div>
-              </li>
-            ))}
-          </ul>
+          {sessionRows.length === 0 ? (
+            <ul className="list"><li>No chat sessions yet.</li></ul>
+          ) : (
+            <InstrumentDataTable title="Recent Chats" selectable={false} pageSize={5} rows={sessionRows} />
+          )}
+          <div className="row wrap">
+            <a className="button-link" href="/chat">Open chat</a>
+          </div>
         </div>
+
         <div className="card stack">
           <div>
             <h3>Recent datasets</h3>
             <div className="muted">Datasets anchor the rest of the app: inspect them, then launch into chat or structured runs.</div>
           </div>
-          <ul className="list">
-            {datasets.length === 0 ? <li>No datasets yet.</li> : datasets.map((dataset) => (
-              <li key={dataset.id}>
-                <a className="button-link" href={`/datasets?dataset_id=${encodeURIComponent(dataset.id)}`}>{dataset.name}</a>
-                <div className="muted">v{dataset.latest_version_no ?? 0} · {dataset.updated_at ?? dataset.created_at ?? '—'}</div>
-              </li>
-            ))}
-          </ul>
+          {datasetRows.length === 0 ? (
+            <ul className="list"><li>No datasets yet.</li></ul>
+          ) : (
+            <InstrumentDataTable title="Recent Datasets" selectable={false} pageSize={5} rows={datasetRows} />
+          )}
+          <div className="row wrap">
+            <a className="button-link" href="/datasets">Open datasets</a>
+          </div>
         </div>
       </div>
 
@@ -102,9 +129,12 @@ export function DashboardPage() {
           </ul>
         </div>
         <div className="card stack">
-          <div>
-            <h3>Recent audit events</h3>
-            <div className="muted">Still useful for debugging and operator visibility, but no longer the main story of the home screen.</div>
+          <div className="row between wrap" style={{ alignItems: 'center' }}>
+            <div>
+              <h3>Recent audit events</h3>
+              <div className="muted">Operator visibility and debugging signals.</div>
+            </div>
+            <StatusChip text={`${audits.length} events`} tone="hover" chipStyle="box" backgroundEffect="glow" />
           </div>
           <ul className="list">
             {audits.length === 0 ? <li>No audit events yet.</li> : audits.map((audit) => <li key={audit.id}>{audit.action} · {audit.status}</li>)}

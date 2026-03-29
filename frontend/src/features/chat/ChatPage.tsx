@@ -1,6 +1,11 @@
 import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useShellSubnav } from '../../components/shellSubnav';
+import { Alert } from '../../design-system/components/Alert';
+import { Modal } from '../../design-system/components/Modal';
+import { MultiLineTextField } from '../../design-system/components/MultiLineTextField';
+import { Popover } from '../../design-system/components/Popover';
+import { StatusChip } from '../../design-system/components/StatusChip';
 import { api } from '../../lib/api';
 
 type Provider = {
@@ -246,6 +251,7 @@ export function ChatPage() {
   const { setSubnav } = useShellSubnav();
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const composerFormRef = useRef<HTMLFormElement | null>(null);
   const activeStreamAbortRef = useRef<AbortController | null>(null);
   const sessionMenuRef = useRef<HTMLDivElement | null>(null);
   const sessionSettingsTitleRef = useRef<HTMLInputElement | null>(null);
@@ -294,7 +300,7 @@ export function ChatPage() {
     <div className="contextual-subnav chat-contextual-subnav">
       <div className="card chat-sidebar-card">
         <div className="chat-subnav-header">
-          <button type="button" className="chat-new-button" onClick={() => void onCreateSession()}>+ New Chat</button>
+          <StatusChip text="+ New Chat" tone="selected" chipStyle="box" backgroundEffect="glow" haloBoost={1.25} clickable onClick={() => void onCreateSession()} />
         </div>
         <div className="chat-subnav-list">
           {groupedSessions.map(([label, group]) => (
@@ -303,6 +309,7 @@ export function ChatPage() {
               <ul className="session-list compact-session-list">
                 {group.map((session) => {
                   const ids = linkedDatasetIds(session.metadata);
+                  const providerName = providers.find((provider) => provider.id === session.provider_id)?.name ?? session.provider_id;
                   return (
                     <li key={session.id} className="session-row-item">
                       <div className={selectedSessionId === session.id ? 'session-row active' : 'session-row'}>
@@ -331,7 +338,12 @@ export function ChatPage() {
                             type="button"
                             title={session.title}
                           >
-                            <strong className="session-title-line">{displaySessionTitle(session)}</strong>
+                            <span className="session-copy">
+                              <strong className="session-title-line">{displaySessionTitle(session)}</strong>
+                              <span className="muted session-meta-line">
+                                {providerName} · {ids.length > 0 ? `${ids.length} dataset${ids.length === 1 ? '' : 's'}` : 'no datasets'}
+                              </span>
+                            </span>
                           </button>
                         )}
                         <div className="session-menu-anchor" ref={showSessionMenuModal && menuSessionId === session.id ? sessionMenuRef : null}>
@@ -351,28 +363,26 @@ export function ChatPage() {
                           >
                             ⋯
                           </button>
-                          {showSessionMenuModal && menuSessionId === session.id ? (
-                            <div className="session-popover-menu">
-                              <button type="button" onClick={() => startRenamingSession(session)}>Rename</button>
-                              <button type="button" onClick={() => openSessionSettings(session)}>Edit settings</button>
-                              <button type="button" onClick={() => {
-                                setSelectedSessionId(session.id);
-                                setShowLinkDatasetModal(true);
-                                setShowSessionMenuModal(false);
-                              }}>Link datasets</button>
-                              <button type="button" onClick={() => {
-                                setSelectedSessionId(session.id);
-                                exportTranscript('markdown');
-                                setShowSessionMenuModal(false);
-                              }}>Export .md</button>
-                              <button type="button" onClick={() => {
-                                setSelectedSessionId(session.id);
-                                exportTranscript('txt');
-                                setShowSessionMenuModal(false);
-                              }}>Export .txt</button>
-                              <button type="button" className="danger-button" onClick={() => requestDeleteSession(session)}>Delete session</button>
-                            </div>
-                          ) : null}
+                          <Popover open={showSessionMenuModal && menuSessionId === session.id}>
+                            <button type="button" onClick={() => startRenamingSession(session)}>Rename</button>
+                            <button type="button" onClick={() => openSessionSettings(session)}>Edit settings</button>
+                            <button type="button" onClick={() => {
+                              setSelectedSessionId(session.id);
+                              setShowLinkDatasetModal(true);
+                              setShowSessionMenuModal(false);
+                            }}>Link datasets</button>
+                            <button type="button" onClick={() => {
+                              setSelectedSessionId(session.id);
+                              exportTranscript('markdown');
+                              setShowSessionMenuModal(false);
+                            }}>Export .md</button>
+                            <button type="button" onClick={() => {
+                              setSelectedSessionId(session.id);
+                              exportTranscript('txt');
+                              setShowSessionMenuModal(false);
+                            }}>Export .txt</button>
+                            <button type="button" className="danger-button" onClick={() => requestDeleteSession(session)}>Delete session</button>
+                          </Popover>
                         </div>
                       </div>
                     </li>
@@ -939,7 +949,13 @@ export function ChatPage() {
             <div className="stack compact-stack">
               <h2>{displaySessionTitle(selectedSession)}</h2>
               <div className="muted">Use Chat for dataset-linked exploration first. Link datasets, ask questions, then branch into workbench or workflows when the process becomes more structured.</div>
-              <div className="muted">{selectedSession ? `${providers.find((provider) => provider.id === selectedSession.provider_id)?.name ?? selectedSession.provider_id} · ${selectedSession.model_name ?? 'default model'}` : 'Create or select a session'}</div>
+              {selectedSession ? (
+                <div className="muted" style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  <span><strong>Provider:</strong> {providers.find((provider) => provider.id === selectedSession.provider_id)?.name ?? selectedSession.provider_id}</span>
+                  <span>·</span>
+                  <span><strong>Model:</strong> {selectedSession.model_name ?? 'default model'}</span>
+                </div>
+              ) : <div className="muted">Create or select a session</div>}
               {lastContextInfo ? (
                 <div className="muted">
                   Context usage: ~{lastContextInfo.estimated_input_tokens ?? '—'} input tokens
@@ -962,43 +978,41 @@ export function ChatPage() {
 
           <div className="stack compact-stack">
             <div className="row wrap between">
-              <div className="row wrap">
+              <div className="row wrap" style={{ gap: 8, alignItems: 'center' }}>
                 <strong>Linked Datasets:</strong>
-                {linkedDatasets.length > 0 ? linkedDatasets.map((dataset) => (
-                  <span key={dataset.id} className="pill">{dataset.name}</span>
-                )) : <span className="pill">No linked datasets</span>}
+                <span className="muted">
+                  {linkedDatasets.length > 0 ? linkedDatasets.map((dataset) => dataset.name).join(', ') : 'No linked datasets'}
+                </span>
               </div>
               {selectedSession ? <button type="button" onClick={() => setShowLinkDatasetModal(true)}>{linkedDatasets.length > 0 ? 'Change Datasets' : 'Link Dataset'}</button> : null}
             </div>
             {linkedDatasets.length > 0 ? <div className="muted">These datasets are included in the chat context for new responses.</div> : null}
           </div>
 
-          {selectedSession && showSessionSettings ? (
-            <div className="modal-backdrop" onClick={() => setShowSessionSettings(false)}>
-              <div className="modal-card" onClick={(event) => event.stopPropagation()}>
-                <div className="row between wrap">
-                  <h2>Chat settings</h2>
-                  <button type="button" onClick={() => setShowSessionSettings(false)}>Close</button>
-                </div>
-                <div className="chat-header-grid">
-                  <input ref={sessionSettingsTitleRef} value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} placeholder="Session title" />
-                  <select value={draftProviderId} onChange={(event) => setDraftProviderId(event.target.value)}>{providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</select>
-                  <ModelPicker value={draftModelName} models={draftModels} onChange={setDraftModelName} selectId="draft-chat-model-select" inputId="draft-chat-model-input" inputPlaceholder="Custom model override" />
-                  {providerModels[draftProviderId]?.fetchedAt ? <div className="muted">Models fetched {new Date(providerModels[draftProviderId].fetchedAt).toLocaleTimeString()}</div> : null}
-                  {draftModelWarning ? <div className="muted">{draftModelWarning}</div> : null}
-                  <textarea value={draftSystemPrompt} onChange={(event) => setDraftSystemPrompt(event.target.value)} rows={4} placeholder="System prompt" className="chat-system-prompt" />
-                  <div className="muted">Configured model limits: context {effectiveModelSettings.contextWindow ?? 'not set'} · max output {effectiveModelSettings.maxOutputTokens ?? 'not set'}</div>
-                  <div className="row between wrap">
-                    <label className="checkbox-row"><input type="checkbox" checked={streamEnabled} onChange={(event) => setStreamEnabled(event.target.checked)} /><span>Stream responses</span></label>
-                    <div className="row wrap">
-                      <button type="button" onClick={() => setShowSessionSettings(false)}>Cancel</button>
-                      <button type="button" onClick={async () => { const ok = await onSaveSession(); if (ok) setShowSessionSettings(false); }}>Save changes</button>
-                    </div>
-                  </div>
-                </div>
+          <Modal
+            open={Boolean(selectedSession && showSessionSettings)}
+            onClose={() => setShowSessionSettings(false)}
+            title="Chat settings"
+            footer={
+              <div className="row wrap" style={{ justifyContent: 'flex-end' }}>
+                <button type="button" onClick={() => setShowSessionSettings(false)}>Cancel</button>
+                <button type="button" onClick={async () => { const ok = await onSaveSession(); if (ok) setShowSessionSettings(false); }}>Save changes</button>
+              </div>
+            }
+          >
+            <div className="chat-header-grid">
+              <input ref={sessionSettingsTitleRef} value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} placeholder="Session title" />
+              <select value={draftProviderId} onChange={(event) => setDraftProviderId(event.target.value)}>{providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</select>
+              <ModelPicker value={draftModelName} models={draftModels} onChange={setDraftModelName} selectId="draft-chat-model-select" inputId="draft-chat-model-input" inputPlaceholder="Custom model override" />
+              {providerModels[draftProviderId]?.fetchedAt ? <div className="muted">Models fetched {new Date(providerModels[draftProviderId].fetchedAt).toLocaleTimeString()}</div> : null}
+              {draftModelWarning ? <div className="muted">{draftModelWarning}</div> : null}
+              <MultiLineTextField label="System prompt" value={draftSystemPrompt} onChange={setDraftSystemPrompt} lines={4} placeholder="System prompt" scrollable resizable={false} />
+              <div className="muted">Configured model limits: context {effectiveModelSettings.contextWindow ?? 'not set'} · max output {effectiveModelSettings.maxOutputTokens ?? 'not set'}</div>
+              <div className="row between wrap">
+                <label className="checkbox-row"><input type="checkbox" checked={streamEnabled} onChange={(event) => setStreamEnabled(event.target.checked)} /><span>Stream responses</span></label>
               </div>
             </div>
-          ) : null}
+          </Modal>
         </div>
 
         <div className="chat-transcript" ref={transcriptRef}>
@@ -1009,20 +1023,18 @@ export function ChatPage() {
                 <p className="muted">Chat is the main surface in BRIDGE. Start blank, start with a dataset, or jump back into a recent conversation.</p>
               </div>
               {(requestedDataset || requestedProvider || requestedModelName) ? (
-                <div className="notice">
+                <Alert>
                   <div>
                     {requestedDataset ? <>Ready to start from dataset <strong>{requestedDataset.name}</strong>.</> : <>Ready to start a new chat from the selected context.</>}
                   </div>
-                  <div className="pill-row" style={{ marginTop: '0.75rem' }}>
-                    {requestedDataset ? <span className="pill">Dataset: {requestedDataset.name}</span> : null}
-                    {requestedProvider ? <span className="pill">Provider: {requestedProvider.name}</span> : null}
-                    {requestedModelName ? <span className="pill">Model: {requestedModelName}</span> : null}
+                  <div className="muted" style={{ marginTop: '0.75rem' }}>
+                    {[requestedDataset ? `Dataset: ${requestedDataset.name}` : null, requestedProvider ? `Provider: ${requestedProvider.name}` : null, requestedModelName ? `Model: ${requestedModelName}` : null].filter(Boolean).join(' · ')}
                   </div>
                   <div className="row wrap" style={{ marginTop: '0.75rem' }}>
                     <button type="button" onClick={() => void onCreateDatasetLinkedChat(requestedDataset?.id || '')}>Start chat with this context</button>
                     <a className="button-link" href="/datasets">Browse all datasets</a>
                   </div>
-                </div>
+                </Alert>
               ) : null}
               <div className="row wrap">
                 <button type="button" onClick={() => void onCreateSession()} disabled={!newProviderId}>Start blank chat</button>
@@ -1069,10 +1081,10 @@ export function ChatPage() {
               <div key={message.id} className={message.role === 'assistant' ? 'message assistant' : message.role === 'system' ? 'message system' : 'message user'}>
                 <div className="message-role">{message.role}</div>
                 {(interrupted || regenerated || groundedIds.length > 0) ? (
-                  <div className="pill-row">
-                    {interrupted ? <span className="pill">Interrupted</span> : null}
-                    {regenerated ? <span className="pill">Regenerated</span> : null}
-                    {groundedIds.length > 0 ? <span className="pill">{formatLinkedDatasetsLabel(groundedNames)}</span> : null}
+                  <div className="row wrap" style={{ gap: 8 }}>
+                    {interrupted ? <StatusChip text="Interrupted" tone="warning" chipStyle="rounded" backgroundEffect="glow" haloBoost={1.2} /> : null}
+                    {regenerated ? <StatusChip text="Regenerated" tone="selected" chipStyle="rounded" backgroundEffect="glow" haloBoost={1.2} /> : null}
+                    {groundedIds.length > 0 ? <StatusChip text={formatLinkedDatasetsLabel(groundedNames)} tone="hover" chipStyle="rounded" backgroundEffect="matte" /> : null}
                   </div>
                 ) : null}
                 <pre>{message.content}</pre>
@@ -1096,69 +1108,81 @@ export function ChatPage() {
           ) : null}
         </div>
 
-        <form className="stack chat-composer" onSubmit={onSend}>
+        <form ref={composerFormRef} className="stack chat-composer" onSubmit={onSend}>
           {!selectedSessionHasProvider && selectedSession ? (
             <div className="notice error">
               <strong>Provider required.</strong> This chat was created without a provider. Open <strong>Settings</strong> and choose one before sending messages.
             </div>
           ) : null}
-          <textarea ref={composerRef} value={composerText} onChange={(event) => setComposerText(event.target.value)} onKeyDown={onComposerKeyDown} name="content" placeholder={selectedSessionId ? (selectedSessionHasProvider ? 'Type your message…' : 'Choose a provider in Settings to enable chatting') : 'Create or select a chat first'} rows={5} disabled={!selectedSessionId || sending || !selectedSessionHasProvider} />
+          <MultiLineTextField
+            label="Message"
+            textareaRef={composerRef}
+            value={composerText}
+            onChange={setComposerText}
+            onKeyDown={onComposerKeyDown}
+            name="content"
+            placeholder={selectedSessionId ? (selectedSessionHasProvider ? 'Type your message…' : 'Choose a provider in Settings to enable chatting') : 'Create or select a chat first'}
+            lines={5}
+            scrollable
+            resizable={false}
+            disabled={!selectedSessionId || sending || !selectedSessionHasProvider}
+          />
           {(streamEnabled && streamStatus !== 'idle' && streamStatusText) ? (
-            <div className={streamBannerClass}>{streamStatusText}</div>
+            <Alert variant={streamStatus === 'error' ? 'error' : 'info'}>{streamStatusText}</Alert>
           ) : null}
           <div className="row between wrap">
             {error ? <pre>{error}</pre> : <span className="muted">Linked datasets are included in this chat’s context.</span>}
-            <div className="row wrap">
-              {sending && streamEnabled ? <button type="button" onClick={cancelStreaming}>Cancel stream</button> : null}
-              <button type="submit" disabled={!selectedSessionId || sending || !selectedSessionHasProvider}>{submitLabel}</button>
+            <div className="row wrap" style={{ gap: 8 }}>
+              {sending && streamEnabled ? <StatusChip text="Cancel Stream" tone="warning" chipStyle="box" backgroundEffect="glow" haloBoost={1.15} clickable onClick={cancelStreaming} /> : null}
+              <StatusChip text={submitLabel} tone="selected" chipStyle="box" backgroundEffect="glow" haloBoost={1.25} clickable={!!selectedSessionId && !sending && selectedSessionHasProvider} disabled={!selectedSessionId || sending || !selectedSessionHasProvider} onClick={() => composerFormRef.current?.requestSubmit()} />
             </div>
           </div>
         </form>
       </div>
 
-      {pendingDeleteSession ? (
-        <div className="modal-backdrop" onClick={cancelDeleteSession}>
-          <div className="modal-card modal-card-sm" onClick={(event) => event.stopPropagation()}>
-            <div className="row between wrap">
-              <h2>Delete chat session?</h2>
-              <button type="button" onClick={cancelDeleteSession}>Close</button>
-            </div>
-            <div className="muted">This will permanently delete <strong>{displaySessionTitle(pendingDeleteSession)}</strong> and its messages.</div>
-            <div className="row wrap" style={{ marginTop: '1rem', justifyContent: 'flex-end' }}>
-              <button type="button" onClick={cancelDeleteSession}>Cancel</button>
-              <button type="button" className="danger-button" onClick={() => { void onDeleteSession(pendingDeleteSession); }}>Delete session</button>
-            </div>
+      <Modal
+        open={Boolean(pendingDeleteSession)}
+        onClose={cancelDeleteSession}
+        title="Delete chat session?"
+        size="sm"
+        footer={
+          <div className="row wrap" style={{ justifyContent: 'flex-end' }}>
+            <button type="button" onClick={cancelDeleteSession}>Cancel</button>
+            <button type="button" className="danger-button" onClick={() => { if (pendingDeleteSession) void onDeleteSession(pendingDeleteSession); }}>Delete session</button>
           </div>
-        </div>
-      ) : null}
+        }
+      >
+        <div className="muted">This will permanently delete <strong>{pendingDeleteSession ? displaySessionTitle(pendingDeleteSession) : 'this chat'}</strong> and its messages.</div>
+      </Modal>
 
-      {showLinkDatasetModal ? (
-        <div className="modal-backdrop" onClick={() => setShowLinkDatasetModal(false)}>
-          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
-            <div className="row between wrap"><h2>Link Dataset</h2><button type="button" onClick={() => setShowLinkDatasetModal(false)}>Close</button></div>
-            <div className="muted">Choose one or more datasets to include in this chat session’s context.</div>
-            <input value={datasetSearch} onChange={(event) => setDatasetSearch(event.target.value)} placeholder="Search datasets by name or ID" />
-            <div className="row wrap">
-              <span className="pill">{filteredDatasets.length} shown</span>
-              <span className="pill">{headerLinkedDatasetIds.length} linked</span>
-            </div>
-            <div className="stack modal-list">
-              {filteredDatasets.map((dataset) => (
-                <label key={dataset.id} className="checkbox-row modal-checkbox-row">
-                  <input type="checkbox" checked={headerLinkedDatasetIds.includes(dataset.id)} onChange={() => toggleDatasetSelection(dataset.id, headerLinkedDatasetIds, setHeaderLinkedDatasetIds)} />
-                  <span>{dataset.name}</span>
-                  <span className="muted">{dataset.id}</span>
-                </label>
-              ))}
-              {filteredDatasets.length === 0 ? <div className="muted">No datasets match your search.</div> : null}
-            </div>
-            <div className="row between wrap">
-              <button type="button" onClick={() => setHeaderLinkedDatasetIds([])}>Clear all</button>
-              <button type="button" onClick={() => void onApplyLinkedDatasets()} disabled={!selectedSession}>Apply linked datasets</button>
-            </div>
+      <Modal
+        open={showLinkDatasetModal}
+        onClose={() => setShowLinkDatasetModal(false)}
+        title="Link Dataset"
+        footer={
+          <div className="row between wrap">
+            <button type="button" onClick={() => setHeaderLinkedDatasetIds([])}>Clear all</button>
+            <button type="button" onClick={() => void onApplyLinkedDatasets()} disabled={!selectedSession}>Apply linked datasets</button>
           </div>
+        }
+      >
+        <div className="muted">Choose one or more datasets to include in this chat session’s context.</div>
+        <input value={datasetSearch} onChange={(event) => setDatasetSearch(event.target.value)} placeholder="Search datasets by name or ID" />
+        <div className="row wrap" style={{ gap: 8 }}>
+          <StatusChip text={`${filteredDatasets.length} shown`} tone="hover" chipStyle="rounded" backgroundEffect="matte" />
+          <StatusChip text={`${headerLinkedDatasetIds.length} linked`} tone="selected" chipStyle="rounded" backgroundEffect="glow" haloBoost={1.2} />
         </div>
-      ) : null}
+        <div className="stack modal-list">
+          {filteredDatasets.map((dataset) => (
+            <label key={dataset.id} className="checkbox-row modal-checkbox-row">
+              <input type="checkbox" checked={headerLinkedDatasetIds.includes(dataset.id)} onChange={() => toggleDatasetSelection(dataset.id, headerLinkedDatasetIds, setHeaderLinkedDatasetIds)} />
+              <span>{dataset.name}</span>
+              <span className="muted">{dataset.id}</span>
+            </label>
+          ))}
+          {filteredDatasets.length === 0 ? <div className="muted">No datasets match your search.</div> : null}
+        </div>
+      </Modal>
     </div>
   );
 }

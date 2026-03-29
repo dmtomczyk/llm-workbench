@@ -13,6 +13,7 @@ import { PluginsPage } from './features/plugins/PluginsPage';
 import { RecipesPage } from './features/recipes/RecipesPage';
 import { ProvidersPage } from './features/providers/ProvidersPage';
 import { SettingsPage } from './features/settings/SettingsPage';
+import { UIKitPage } from './features/ui-kit/UIKitPage';
 import { WorkbenchPage } from './features/workbench/WorkbenchPage';
 import { WorkflowsPage } from './features/workflows/WorkflowsPage';
 
@@ -48,6 +49,7 @@ export function App() {
           <Route path="/audit" element={<AuditPage />} />
           <Route path="/plugins" element={<PluginsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/ui-kit" element={<UIKitPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

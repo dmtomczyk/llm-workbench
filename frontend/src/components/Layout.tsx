@@ -1,17 +1,31 @@
 import { ReactNode, useMemo, useState } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 
 import { useAuth } from '../auth';
+import { NavMenu } from '../design-system/components/NavMenu';
+import { StatusChip } from '../design-system/components/StatusChip';
 import { NAV_SECTIONS } from '../routes/nav';
 import { NavIcon } from './NavIcon';
 import { ShellSubnavContext } from './shellSubnav';
 
 export function Layout() {
   const location = useLocation();
+  const navigate = useNavigate();
   const auth = useAuth();
   const [subnav, setSubnav] = useState<ReactNode>(null);
   const hasSubnav = Boolean(subnav);
   const shellClassName = useMemo(() => `shell${hasSubnav ? ' shell-with-subnav' : ''}${location.pathname.startsWith('/chat') ? ' shell-chat-route' : ''}`, [hasSubnav, location.pathname]);
+  const navItems = useMemo(() => NAV_SECTIONS.flatMap((section) => section.items.map((item) => ({
+    id: item.route,
+    label: item.label,
+    icon: <NavIcon route={item.route} />,
+    trailing: undefined,
+  }))), []);
+  const routeToPath = useMemo(() => Object.fromEntries(NAV_SECTIONS.flatMap((section) => section.items.map((item) => [item.route, item.path]))), []);
+  const activeRoute = useMemo(() => {
+    const match = NAV_SECTIONS.flatMap((section) => section.items).find((item) => item.path === '/' ? location.pathname === '/' : location.pathname.startsWith(item.path));
+    return match?.route ?? 'home';
+  }, [location.pathname]);
 
   return (
     <ShellSubnavContext.Provider value={{ setSubnav }}>
@@ -21,29 +35,18 @@ export function Layout() {
           <h1 className="brand-logo">BRIDGE</h1>
           <p>Where LLMs, tools, and data meet</p>
         </div>
-        <nav className="nav">
-          {NAV_SECTIONS.map((section) => (
-            <div key={section.id} className="nav-section">
-              <div className="nav-section-label">{section.label}</div>
-              <div className="nav-section-items">
-                {section.items.map((item) => (
-                  <NavLink
-                    key={item.route}
-                    to={item.path}
-                    className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}
-                    end={item.path === '/'}
-                    title={item.description ?? item.label}
-                  >
-                    <span className="nav-link-inner">
-                      <span className="nav-icon" aria-hidden="true"><NavIcon route={item.route} /></span>
-                      <span>{item.label}</span>
-                    </span>
-                  </NavLink>
-                ))}
-              </div>
-            </div>
-          ))}
-        </nav>
+        <NavMenu
+          title="Sidebar Navigation"
+          subtitle="Primary Routes"
+          defaultActiveId={activeRoute}
+          key={activeRoute}
+          minHeight={520}
+          items={navItems}
+          onChange={(id) => {
+            const path = routeToPath[id];
+            if (path) navigate(path);
+          }}
+        />
       </aside>
       {hasSubnav ? <aside className="contextual-sidebar">{subnav}</aside> : null}
       <main className="main">
@@ -53,9 +56,9 @@ export function Layout() {
             <span className="muted">Grounded chat first; datasets, prompts, workflows, and automation behind it.</span>
           </div>
           {auth.config?.enabled && auth.user ? (
-            <div className="row wrap">
+            <div className="row wrap" style={{ gap: 8, alignItems: 'center' }}>
               <span className="muted">{auth.user.name || auth.user.email || auth.user.sub}</span>
-              <button type="button" onClick={() => auth.beginLogout()}>Logout</button>
+              <StatusChip text="Logout" tone="warning" chipStyle="box" backgroundEffect="glow" haloBoost={1.15} clickable onClick={() => auth.beginLogout()} />
             </div>
           ) : null}
         </header>
