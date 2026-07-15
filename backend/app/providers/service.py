@@ -62,6 +62,24 @@ SEED_PROVIDERS = [
         }),
         'enabled': 1,
     },
+    {
+        'id': 'prv_atlascloud',
+        'name': 'atlascloud',
+        'plugin_id': 'openai_compatible',
+        'provider_kind': 'openai_compatible',
+        'base_url': 'https://api.atlascloud.ai/v1',
+        'default_model': 'qwen/qwen3.5-flash',
+        'auth_type': 'bearer',
+        'secret_alias': 'ATLASCLOUD_API_KEY',
+        'capabilities_json': json.dumps({
+            'streaming': True,
+            'json_mode': True,
+            'usage_metrics': True,
+            'conversation_state': False,
+            'tools': False,
+        }),
+        'enabled': 1,
+    },
 ]
 
 
